@@ -39,6 +39,8 @@ def main() -> int:
     ap.add_argument("--prompt-preset", default="hoshino", choices=["hoshino", "poster"])
     ap.add_argument("--timeout", type=int, default=900)
     ap.add_argument("--max-tokens", type=int, default=2048)
+    ap.add_argument("--width", type=int, default=0, help="0 = auto canvas")
+    ap.add_argument("--height", type=int, default=0, help="0 = auto canvas")
     args = ap.parse_args()
 
     prompt = args.prompt or (POSTER if args.prompt_preset == "poster" else HOSHINO)
@@ -47,12 +49,15 @@ def main() -> int:
     text, size_note, width, height = node.optimize(
         prompt=prompt,
         skill=args.skill,
+        width=args.width,
+        height=args.height,
         base_url=args.base_url,
         model=args.model,
         api_key=args.api_key,
         language=args.language,
         output_format=args.format,
         temperature=0.5,
+        top_p=0.9,
         max_tokens=args.max_tokens,
         timeout=args.timeout,
         extra_instruction="",

@@ -20,13 +20,11 @@
 
 | 节点 | 作用 |
 |---|---|
-| **Skill Prompt Optimizer** | HTTP 快速上手：`prompt` + `skill` + `base_url` + `model`，加语言/格式/基础采样。 |
-| **Skill Prompt Optimizer (Advanced)** | HTTP 版，多一个 `top_p`。 |
-| **Skill Prompt Optimizer (llama.cpp)** | 进程内 GGUF：`gguf_model`、`n_ctx`、`n_gpu_layers`、`keep_model_loaded`。 |
-| **Skill Prompt Optimizer (llama.cpp Advanced)** | 再加 `chat_format`、`seed`、`top_p`，可复现。 |
+| **Skill Prompt Optimizer** | OpenAI 兼容 HTTP 端点（Ollama / LM Studio / llama.cpp server / 云端）。 |
+| **Skill Prompt Optimizer (llama.cpp)** | 进程内 GGUF 后端：`gguf_model`、`n_ctx`、`n_gpu_layers`、`chat_format`、`seed`。 |
 | **Skill Prompt Layout Compiler** | 接收 Layout **草稿**（`abs` / `xyxy`），输出最终单行 JSON（`abs_centralized` / `yxyx` 整数），并做结构校验。 |
 
-两个后端各用独立节点：一个节点只显示它真正用到的参数，没有 `backend` 开关，也没有隐藏的覆盖项。
+一个后端一个节点：节点只显示它真正用到的参数，没有 `backend` 开关，也没有隐藏的覆盖项。
 
 ---
 
@@ -96,11 +94,12 @@ skills/
 
 MOSS 这类模板把 Layout 拆成“草稿 → 最终”。LLM 的算术不可信，编译器可信。
 
-1. 设 `output_format = layout`，节点会在用户消息里附加流水线契约：先出草稿 JSON
+1. 可选：先设 `width` / `height`。`>0` 表示固定画布——尺寸作为构图约束写进用户消息，Layout 模式下同时是 bbox 的硬边界（`0<=x1<=W`），输出回显这两个数；`0` 表示交给模型决定。
+2. 设 `output_format = layout`，节点会在用户消息里附加流水线契约：先出草稿 JSON
    （`width`、`height`、`bbox_coord_space="abs"`、`bbox_format="xyxy"`、`summary`、`items`），
    再另起一行 `CANVAS: WxH`。
-2. 节点把 `CANVAS:` 行从正文里摘出来，画布尺寸通过 `size_note` / `width` / `height` 输出。
-3. 把提示词正文接进 **Skill Prompt Layout Compiler**。编译器会：
+3. 节点把 `CANVAS:` 行从正文里摘出来，画布尺寸通过 `size_note` / `width` / `height` 输出。
+4. 把提示词正文接进 **Skill Prompt Layout Compiler**。编译器会：
    - 把 `[x0,y0,x1,y1]` 转成 `[y0-H/2, x0-W/2, y1-H/2, x1-W/2]`；
    - 小数边先左/上取整向下、右/下取整向上；
    - 丢弃 schema 外的根字段，校验 `label` 枚举、`text` 项、框面积、越界、16 倍数画布；
@@ -118,9 +117,11 @@ MOSS 这类模板把 Layout 拆成“草稿 → 最终”。LLM 的算术不可�
 
 | 参数 | 含义 |
 |---|---|
+| `width` / `height` | **既是输入也是输出。** `>0` = 固定画布：尺寸作为硬性构图约束写给模型（Layout 模式下同时是 bbox 边界），输出原样回显。`0` = 自动：由模型决定，尺寸从 `CANVAS:` 行解析。两边要么都填，要么都不填。Layout 模式要求 16 的倍数。 |
 | `language` | `English`（默认）/ `中文` / `Bilingual`（两份完整版本） |
 | `output_format` | `auto` 由技能自行判断；`caption` / `tag` / `layout` 强制格式 |
 | `temperature` | 0.5 是遵循规则的好起点 |
+| `top_p` | 0.9 一般够用，很少需要动 |
 | `max_tokens` | **要留余量**：思考型模型大半 token 花在隐藏推理上。正文像被截断时，看控制台的 `finish_reason=length` 警告并调大它 |
 | `n_ctx` | 仅 llama.cpp。技能 + 提示词 + `max_tokens` 超出时会拒绝运行并报出具体数字 |
 | `keep_model_loaded` | 仅 llama.cpp。设 `false` 则每次跑完卸载并释放显存 |

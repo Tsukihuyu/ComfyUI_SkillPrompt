@@ -22,12 +22,10 @@ robocopy "D:\Hermes\projects\ComfyUI_SkillPrompt" "D:\GAME\ComfyUI\ComfyUI\custo
 
 ## 3. 确认节点出现
 
-右键菜单 → `SkillPrompt` 分类下应有五个：
+右键菜单 → `SkillPrompt` 分类下应有三个：
 
 - `Skill Prompt Optimizer`（HTTP）
-- `Skill Prompt Optimizer (Advanced)`（HTTP）
 - `Skill Prompt Optimizer (llama.cpp)`
-- `Skill Prompt Optimizer (llama.cpp Advanced)`
 - `Skill Prompt Layout Compiler`
 
 启动日志里应该能看到一条 `[SkillPrompt] skills: ...`（首次建下拉框时扫描）。

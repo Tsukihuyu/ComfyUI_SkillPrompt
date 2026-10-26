@@ -36,12 +36,15 @@
       "widgets_values": [
         "backless cheongsam, hoshino (blue archive), 1girl, heterochromia, fang, pink hair, ahoge, low twintails, pink halo, looking at viewer, white backless short cheongsam, full body, white high-heel sandals, open meadow, sakura tree in full bloom, falling petals, blue sky, dappled sunlight",
         "moss-anime-prompt-slim",
+        0,
+        0,
         "http://127.0.0.1:11434/v1",
         "qwen2.5:14b-instruct",
         "",
         "English",
         "caption",
         0.5,
+        0.9,
         2048,
         600,
         ""

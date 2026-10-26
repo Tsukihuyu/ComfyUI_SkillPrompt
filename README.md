@@ -21,14 +21,12 @@ Two things make this different from a generic "prompt enhancer":
 
 | Node | What it does |
 |---|---|
-| **Skill Prompt Optimizer** | HTTP quick start: `prompt` + `skill` + `base_url` + `model`, plus language / format / sampling basics. |
-| **Skill Prompt Optimizer (Advanced)** | HTTP with `top_p` added. |
-| **Skill Prompt Optimizer (llama.cpp)** | In-process GGUF: `gguf_model`, `n_ctx`, `n_gpu_layers`, `keep_model_loaded`. |
-| **Skill Prompt Optimizer (llama.cpp Advanced)** | Adds `chat_format`, `seed`, `top_p` — reproducible runs. |
+| **Skill Prompt Optimizer** | OpenAI-compatible HTTP endpoint (Ollama / LM Studio / llama.cpp server / cloud). |
+| **Skill Prompt Optimizer (llama.cpp)** | In-process GGUF backend: `gguf_model`, `n_ctx`, `n_gpu_layers`, `chat_format`, `seed`. |
 | **Skill Prompt Layout Compiler** | Takes the LLM's Layout *draft* (`bbox_coord_space="abs"`, `bbox_format="xyxy"`) and emits the final one-line JSON (`abs_centralized` / `yxyx`, integers), with structural validation. |
 
-Each backend has its own nodes on purpose: a node only shows the widgets it uses, and
-there is no `backend` switch or hidden override anywhere.
+One node per backend: a node only shows the widgets it uses, and there is no `backend`
+switch or hidden override anywhere.
 
 ---
 
@@ -103,12 +101,15 @@ skills/
 Template-authoring skills like MOSS use a **draft → final** split. LLMs are unreliable at
 arithmetic; the compiler is not.
 
-1. Set `output_format = layout`. The optimizer appends a pipeline contract to the user
+1. Optionally set `width` / `height` first. `>0` fixes the canvas: the size goes into the
+   user message as a composition constraint and, in Layout mode, as the hard bbox bounds
+   (`0<=x1<=W`). The outputs then echo those numbers. `0` = let the model choose.
+2. Set `output_format = layout`. The optimizer appends a pipeline contract to the user
    message: emit a draft JSON (`width`, `height`, `bbox_coord_space="abs"`,
    `bbox_format="xyxy"`, `summary`, `items`) followed by a `CANVAS: WxH` line.
-2. The node strips the `CANVAS:` line out of the prompt body and exposes the size as
+3. The node strips the `CANVAS:` line out of the prompt body and exposes the size as
    `size_note` / `width` / `height` outputs.
-3. Feed the prompt text into **Skill Prompt Layout Compiler** (or trust the draft as-is
+4. Feed the prompt text into **Skill Prompt Layout Compiler** (or trust the draft as-is
    if your model consumes drafts directly). The compiler:
    - converts `[x0,y0,x1,y1]` → `[y0-H/2, x0-W/2, y1-H/2, x1-W/2]`,
    - floors left/top and ceils right/bottom on fractional edges,
@@ -128,9 +129,11 @@ Example output (1024×1024, one item at `[100,320,440,760]`):
 
 | Parameter | Meaning |
 |---|---|
+| `width` / `height` | **In and out.** `>0` = fixed canvas: the size is passed to the model as a hard composition constraint (and the bbox bounds in Layout mode), and echoed back on the outputs. `0` = auto: the model picks the canvas and the size is parsed from its `CANVAS:` line. Fill both or neither. Layout mode requires multiples of 16. |
 | `language` | `English` (default), `中文`, `Bilingual` (two complete versions) |
 | `output_format` | `auto` lets the skill decide; `caption` / `tag` / `layout` force a format |
 | `temperature` | 0.5 is a good starting point for rule-following |
+| `top_p` | 0.9 is a sane default; rarely worth touching |
 | `max_tokens` | **Headroom matters**: thinking models spend most tokens on hidden reasoning. If the text looks cut off, check the console for the `finish_reason=length` warning and raise this. |
 | `n_ctx` | llama.cpp only. The node refuses to run when skill + prompt + `max_tokens` exceed it, and tells you the numbers. |
 | `keep_model_loaded` | llama.cpp only. `false` unloads and frees VRAM after every run. |
