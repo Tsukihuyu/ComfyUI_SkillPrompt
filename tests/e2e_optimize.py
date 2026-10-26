@@ -47,7 +47,6 @@ def main() -> int:
     text, size_note, width, height = node.optimize(
         prompt=prompt,
         skill=args.skill,
-        custom_skill="",
         base_url=args.base_url,
         model=args.model,
         api_key=args.api_key,

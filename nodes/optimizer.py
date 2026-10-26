@@ -1,12 +1,24 @@
-"""SkillPrompt optimizer nodes (Standard + Advanced)."""
+"""SkillPrompt optimizer nodes.
+
+Two backends, two nodes each, so a node only shows the widgets it actually uses:
+
+  SkillPromptOptimizer                    HTTP, quick start
+  SkillPromptOptimizerAdvanced            HTTP, full sampling control
+  SkillPromptOptimizerLlamaCpp            in-process llama.cpp, quick start
+  SkillPromptOptimizerLlamaCppAdvanced    in-process llama.cpp, full control
+
+There is deliberately no "custom_skill" input: a skill is always a folder with a
+SKILL.md, so the rulebook a workflow used stays visible, versionable and reusable.
+Per-run tweaks belong in ``extra_instruction``, which appends and never overrides.
+"""
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 from . import http_client, llamacpp_client
 from .promptkit import sanitize_output
-from .skills import PLACEHOLDER, estimate_tokens, get_skill, skill_choices
+from .skills import estimate_tokens, get_skill, skill_choices
 
 CATEGORY = "SkillPrompt"
 DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
@@ -30,6 +42,22 @@ LAYOUT_CONTRACT = """Layout 流水线要求（优先于 skill 中关于最终坐
 3. bbox 用全图左上角像素坐标 [x0,y0,x1,y1]；画布宽高必须是 16 的倍数。
 4. 不要自行换算中心化坐标，也不要输出 yxyx — 由后处理节点做确定性编译。
 5. JSON 之后另起一行写 CANVAS: WxH（例如 CANVAS: 1024x1024）。"""
+
+Sender = Callable[[List[Dict[str, str]], int], Tuple[str, Any]]
+
+SKILL_TOOLTIP = "写词规则书：skills/<名称>/SKILL.md 全文作为 system 提示词。新增技能后重启 ComfyUI。"
+PROMPT_TOOLTIP = "原始需求：tag 串、一句话或一段中文描述都行。"
+EXTRA_TOOLTIP = "本次追加要求（如“竖幅构图”“不要画标题”）。只追加，不覆盖 skill 规则。"
+LANG_TOOLTIP = "English 默认；中文只出中文；Bilingual 出两份各自完整的版本。"
+FORMAT_TOOLTIP = "auto 交给 skill 判断；caption / tag / layout 强制格式。"
+TEMP_TOOLTIP = "遵循规则建议 0.5 左右。"
+MAXTOK_TOOLTIP = "思考型模型会先花大量 token 在隐藏推理上，2048 起步更稳。"
+TIMEOUT_TOOLTIP = "单次请求超时（秒）。本地 27B + 完整模板首次 prefill 可能要一两分钟。"
+BASEURL_TOOLTIP = "OpenAI 兼容端点，如 http://127.0.0.1:11434/v1（Ollama）、http://127.0.0.1:8491/v1（llama.cpp router）。"
+GGUF_TOOLTIP = "ComfyUI/models/LLM/ 下的 .gguf。缺模型可设环境变量 SKILLPROMPT_GGUF_DIRS。"
+CTX_TOOLTIP = "上下文窗口。完整版 skill 约 21k tokens，建议 32768 起步。"
+LAYERS_TOOLTIP = "-1 表示全部层放 GPU；显存不够时调小。"
+KEEP_TOOLTIP = "True 保留模型在显存里加速下一次；显存紧张时关掉。"
 
 
 def _build_messages(
@@ -57,83 +85,29 @@ def _build_messages(
     ]
 
 
-def _run(
+def _generate(
     prompt: str,
     skill: str,
-    custom_skill: str,
-    backend: str,
-    base_url: str,
-    api_key: str,
-    model: str,
-    gguf_model: str,
-    n_ctx: int,
-    n_gpu_layers: int,
-    chat_format: str,
-    keep_model_loaded: bool,
-    seed: int,
-    temperature: float,
-    top_p: float,
-    max_tokens: int,
-    timeout: int,
+    extra_instruction: str,
     language: str,
     output_format: str,
-    extra_instruction: str,
+    sender: Sender,
 ) -> Tuple[str, str, int, int]:
-    custom = (custom_skill or "").strip()
-    if custom:
-        skill_text = custom
-        skill_label = "custom_skill"
-    else:
-        info = get_skill(skill)
-        skill_text = info["text"]
-        skill_label = f"{info['name']} (~{info['tokens']} tok)"
-
+    """Shared pipeline: resolve skill -> build messages -> call backend -> sanitise."""
+    info = get_skill(skill)
+    skill_text = info["text"]
     est = estimate_tokens(skill_text) + estimate_tokens(prompt or "")
     print(
-        f"[SkillPrompt] skill={skill_label} est_tokens≈{est} "
-        f"backend={backend} format={output_format} lang={language}"
+        f"[SkillPrompt] skill={info['name']} (~{info['tokens']} tok) "
+        f"est_tokens≈{est} format={output_format} lang={language}"
     )
 
     messages = _build_messages(prompt, skill_text, language, output_format, extra_instruction)
+    text, usage = sender(messages, est)
 
-    if backend == "llama_cpp":
-        need = est + int(max_tokens) + 256
-        if int(n_ctx) < need:
-            raise ValueError(
-                f"上下文不够：skill + 提示词约 {est} tokens，加 max_tokens={max_tokens} 需要 ≥ {need}，"
-                f"当前 n_ctx={n_ctx}。把 n_ctx 调大（注意显存），或改用精简版 skill。"
-            )
-        text, _usage = llamacpp_client.chat_completion(
-            model_name=gguf_model,
-            messages=messages,
-            n_ctx=int(n_ctx),
-            n_gpu_layers=int(n_gpu_layers),
-            chat_format=chat_format or "",
-            temperature=float(temperature),
-            top_p=float(top_p),
-            max_tokens=int(max_tokens),
-            seed=int(seed),
-            keep_model_loaded=bool(keep_model_loaded),
-        )
-    else:
-        if est > 24000:
-            print(
-                f"[SkillPrompt] 警告：系统提示约 {est} tokens，"
-                "确认服务端模型的上下文窗口够大（≥32k 更稳妥）。"
-            )
-        text, _usage = http_client.chat_completion(
-            base_url=base_url,
-            api_key=api_key,
-            model=model,
-            messages=messages,
-            temperature=float(temperature),
-            top_p=float(top_p),
-            max_tokens=int(max_tokens),
-            timeout=int(timeout),
-        )
-    if _usage:
-        print(f"[SkillPrompt] usage={_usage}")
-        if _usage.get("finish_reason") == "length":
+    if usage:
+        print(f"[SkillPrompt] usage={usage}")
+        if usage.get("finish_reason") == "length":
             print(
                 "[SkillPrompt] 警告：输出被 max_tokens 截断（finish_reason=length）。"
                 "思考型模型会先消耗大量 token 在隐藏推理上，把 max_tokens 调大再试。"
@@ -147,25 +121,60 @@ def _run(
     return clean["prompt"], size_note, width, height
 
 
+def _http_sender(base_url: str, api_key: str, model: str, temperature: float,
+                 top_p: float, max_tokens: int, timeout: int) -> Sender:
+    def sender(messages: List[Dict[str, str]], est: int):
+        if est > 24000:
+            print(f"[SkillPrompt] 警告：系统提示约 {est} tokens，确认服务端上下文窗口够大（≥32k 更稳妥）。")
+        return http_client.chat_completion(
+            base_url=base_url, api_key=api_key, model=model, messages=messages,
+            temperature=temperature, top_p=top_p, max_tokens=max_tokens, timeout=timeout,
+        )
+
+    return sender
+
+
+def _llamacpp_sender(gguf_model: str, n_ctx: int, n_gpu_layers: int, chat_format: str,
+                     keep_model_loaded: bool, seed: int, temperature: float,
+                     top_p: float, max_tokens: int) -> Sender:
+    def sender(messages: List[Dict[str, str]], est: int):
+        need = est + int(max_tokens) + 256
+        if int(n_ctx) < need:
+            raise ValueError(
+                f"上下文不够：skill + 提示词约 {est} tokens，加 max_tokens={max_tokens} 需要 ≥ {need}，"
+                f"当前 n_ctx={n_ctx}。把 n_ctx 调大（注意显存），或改用精简版 skill。"
+            )
+        return llamacpp_client.chat_completion(
+            model_name=gguf_model, messages=messages, n_ctx=int(n_ctx),
+            n_gpu_layers=int(n_gpu_layers), chat_format=chat_format or "",
+            temperature=float(temperature), top_p=float(top_p), max_tokens=int(max_tokens),
+            seed=int(seed), keep_model_loaded=bool(keep_model_loaded),
+        )
+
+    return sender
+
+
+# --------------------------------------------------------------------------- #
+# HTTP backend
+# --------------------------------------------------------------------------- #
 class SkillPromptOptimizer:
-    """Standard node: OpenAI-compatible endpoint, three core inputs."""
+    """Standard node for any OpenAI-compatible endpoint."""
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "prompt": ("STRING", {"multiline": True, "default": ""}),
-                "skill": (skill_choices(),),
-                "custom_skill": ("STRING", {"multiline": True, "default": ""}),
-                "base_url": ("STRING", {"default": DEFAULT_BASE_URL}),
-                "model": ("STRING", {"default": ""}),
-                "api_key": ("STRING", {"default": ""}),
-                "language": (["English", "中文", "Bilingual"],),
-                "output_format": (["auto", "caption", "tag", "layout"],),
-                "temperature": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 2.0, "step": 0.05}),
-                "max_tokens": ("INT", {"default": 2048, "min": 64, "max": 32768, "step": 64}),
-                "timeout": ("INT", {"default": 600, "min": 30, "max": 3600, "step": 30}),
-                "extra_instruction": ("STRING", {"multiline": True, "default": ""}),
+                "prompt": ("STRING", {"multiline": True, "default": "", "tooltip": PROMPT_TOOLTIP}),
+                "skill": (skill_choices(), {"tooltip": SKILL_TOOLTIP}),
+                "base_url": ("STRING", {"default": DEFAULT_BASE_URL, "tooltip": BASEURL_TOOLTIP}),
+                "model": ("STRING", {"default": "", "tooltip": "服务端实际暴露的模型名。"}),
+                "api_key": ("STRING", {"default": "", "tooltip": "本地端点留空；云端服务填 key。"}),
+                "language": (["English", "中文", "Bilingual"], {"tooltip": LANG_TOOLTIP}),
+                "output_format": (["auto", "caption", "tag", "layout"], {"tooltip": FORMAT_TOOLTIP}),
+                "temperature": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip": TEMP_TOOLTIP}),
+                "max_tokens": ("INT", {"default": 2048, "min": 64, "max": 32768, "step": 64, "tooltip": MAXTOK_TOOLTIP}),
+                "timeout": ("INT", {"default": 600, "min": 30, "max": 3600, "step": 30, "tooltip": TIMEOUT_TOOLTIP}),
+                "extra_instruction": ("STRING", {"multiline": True, "default": "", "tooltip": EXTRA_TOOLTIP}),
             }
         }
 
@@ -174,72 +183,31 @@ class SkillPromptOptimizer:
     FUNCTION = "optimize"
     CATEGORY = CATEGORY
 
-    def optimize(
-        self,
-        prompt: str,
-        skill: str,
-        custom_skill: str,
-        base_url: str,
-        model: str,
-        api_key: str,
-        language: str,
-        output_format: str,
-        temperature: float,
-        max_tokens: int,
-        timeout: int,
-        extra_instruction: str,
-    ):
-        return _run(
-            prompt=prompt,
-            skill=skill,
-            custom_skill=custom_skill,
-            backend="http",
-            base_url=base_url,
-            api_key=api_key,
-            model=model,
-            gguf_model=PLACEHOLDER,
-            n_ctx=32768,
-            n_gpu_layers=-1,
-            chat_format="",
-            keep_model_loaded=True,
-            seed=-1,
-            temperature=temperature,
-            top_p=0.9,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            language=language,
-            output_format=output_format,
-            extra_instruction=extra_instruction,
-        )
+    def optimize(self, prompt, skill, base_url, model, api_key, language,
+                 output_format, temperature, max_tokens, timeout, extra_instruction):
+        sender = _http_sender(base_url, api_key, model, temperature, 0.9, max_tokens, timeout)
+        return _generate(prompt, skill, extra_instruction, language, output_format, sender)
 
 
 class SkillPromptOptimizerAdvanced:
-    """Advanced node: HTTP or in-process llama.cpp, full parameter control."""
+    """Advanced HTTP node: adds top_p."""
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "prompt": ("STRING", {"multiline": True, "default": ""}),
-                "skill": (skill_choices(),),
-                "custom_skill": ("STRING", {"multiline": True, "default": ""}),
-                "backend": (["http", "llama_cpp"],),
-                "base_url": ("STRING", {"default": DEFAULT_BASE_URL}),
-                "model": ("STRING", {"default": ""}),
-                "api_key": ("STRING", {"default": ""}),
-                "gguf_model": (llamacpp_client.list_gguf_models(),),
-                "n_ctx": ("INT", {"default": 32768, "min": 2048, "max": 262144, "step": 1024}),
-                "n_gpu_layers": ("INT", {"default": -1, "min": -1, "max": 999, "step": 1}),
-                "chat_format": ("STRING", {"default": ""}),
-                "keep_model_loaded": ("BOOLEAN", {"default": True}),
-                "seed": ("INT", {"default": -1, "min": -1, "max": 2 ** 63 - 1, "step": 1}),
-                "temperature": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 2.0, "step": 0.05}),
-                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.05}),
-                "max_tokens": ("INT", {"default": 2048, "min": 64, "max": 32768, "step": 64}),
-                "timeout": ("INT", {"default": 600, "min": 30, "max": 3600, "step": 30}),
-                "language": (["English", "中文", "Bilingual"],),
-                "output_format": (["auto", "caption", "tag", "layout"],),
-                "extra_instruction": ("STRING", {"multiline": True, "default": ""}),
+                "prompt": ("STRING", {"multiline": True, "default": "", "tooltip": PROMPT_TOOLTIP}),
+                "skill": (skill_choices(), {"tooltip": SKILL_TOOLTIP}),
+                "base_url": ("STRING", {"default": DEFAULT_BASE_URL, "tooltip": BASEURL_TOOLTIP}),
+                "model": ("STRING", {"default": "", "tooltip": "服务端实际暴露的模型名。"}),
+                "api_key": ("STRING", {"default": "", "tooltip": "本地端点留空；云端服务填 key。"}),
+                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.05, "tooltip": "核采样阈值。"}),
+                "temperature": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip": TEMP_TOOLTIP}),
+                "max_tokens": ("INT", {"default": 2048, "min": 64, "max": 32768, "step": 64, "tooltip": MAXTOK_TOOLTIP}),
+                "timeout": ("INT", {"default": 600, "min": 30, "max": 3600, "step": 30, "tooltip": TIMEOUT_TOOLTIP}),
+                "language": (["English", "中文", "Bilingual"], {"tooltip": LANG_TOOLTIP}),
+                "output_format": (["auto", "caption", "tag", "layout"], {"tooltip": FORMAT_TOOLTIP}),
+                "extra_instruction": ("STRING", {"multiline": True, "default": "", "tooltip": EXTRA_TOOLTIP}),
             }
         }
 
@@ -248,48 +216,81 @@ class SkillPromptOptimizerAdvanced:
     FUNCTION = "optimize"
     CATEGORY = CATEGORY
 
-    def optimize(
-        self,
-        prompt: str,
-        skill: str,
-        custom_skill: str,
-        backend: str,
-        base_url: str,
-        model: str,
-        api_key: str,
-        gguf_model: str,
-        n_ctx: int,
-        n_gpu_layers: int,
-        chat_format: str,
-        keep_model_loaded: bool,
-        seed: int,
-        temperature: float,
-        top_p: float,
-        max_tokens: int,
-        timeout: int,
-        language: str,
-        output_format: str,
-        extra_instruction: str,
-    ):
-        return _run(
-            prompt=prompt,
-            skill=skill,
-            custom_skill=custom_skill,
-            backend=backend,
-            base_url=base_url,
-            api_key=api_key,
-            model=model,
-            gguf_model=gguf_model,
-            n_ctx=n_ctx,
-            n_gpu_layers=n_gpu_layers,
-            chat_format=chat_format,
-            keep_model_loaded=keep_model_loaded,
-            seed=seed,
-            temperature=temperature,
-            top_p=top_p,
-            max_tokens=max_tokens,
-            timeout=timeout,
-            language=language,
-            output_format=output_format,
-            extra_instruction=extra_instruction,
-        )
+    def optimize(self, prompt, skill, base_url, model, api_key, top_p, temperature,
+                 max_tokens, timeout, language, output_format, extra_instruction):
+        sender = _http_sender(base_url, api_key, model, temperature, top_p, max_tokens, timeout)
+        return _generate(prompt, skill, extra_instruction, language, output_format, sender)
+
+
+# --------------------------------------------------------------------------- #
+# llama.cpp backend
+# --------------------------------------------------------------------------- #
+class SkillPromptOptimizerLlamaCpp:
+    """Standard node for the in-process llama.cpp backend."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": ("STRING", {"multiline": True, "default": "", "tooltip": PROMPT_TOOLTIP}),
+                "skill": (skill_choices(), {"tooltip": SKILL_TOOLTIP}),
+                "gguf_model": (llamacpp_client.list_gguf_models(), {"tooltip": GGUF_TOOLTIP}),
+                "n_ctx": ("INT", {"default": 32768, "min": 2048, "max": 262144, "step": 1024, "tooltip": CTX_TOOLTIP}),
+                "n_gpu_layers": ("INT", {"default": -1, "min": -1, "max": 999, "step": 1, "tooltip": LAYERS_TOOLTIP}),
+                "keep_model_loaded": ("BOOLEAN", {"default": True, "tooltip": KEEP_TOOLTIP}),
+                "language": (["English", "中文", "Bilingual"], {"tooltip": LANG_TOOLTIP}),
+                "output_format": (["auto", "caption", "tag", "layout"], {"tooltip": FORMAT_TOOLTIP}),
+                "temperature": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip": TEMP_TOOLTIP}),
+                "max_tokens": ("INT", {"default": 2048, "min": 64, "max": 32768, "step": 64, "tooltip": MAXTOK_TOOLTIP}),
+                "extra_instruction": ("STRING", {"multiline": True, "default": "", "tooltip": EXTRA_TOOLTIP}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "STRING", "INT", "INT")
+    RETURN_NAMES = ("optimized_prompt", "size_note", "width", "height")
+    FUNCTION = "optimize"
+    CATEGORY = CATEGORY
+
+    def optimize(self, prompt, skill, gguf_model, n_ctx, n_gpu_layers,
+                 keep_model_loaded, language, output_format, temperature,
+                 max_tokens, extra_instruction):
+        sender = _llamacpp_sender(gguf_model, n_ctx, n_gpu_layers, "", keep_model_loaded,
+                                  -1, temperature, 0.9, max_tokens)
+        return _generate(prompt, skill, extra_instruction, language, output_format, sender)
+
+
+class SkillPromptOptimizerLlamaCppAdvanced:
+    """Advanced llama.cpp node: chat_format, seed, top_p."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "prompt": ("STRING", {"multiline": True, "default": "", "tooltip": PROMPT_TOOLTIP}),
+                "skill": (skill_choices(), {"tooltip": SKILL_TOOLTIP}),
+                "gguf_model": (llamacpp_client.list_gguf_models(), {"tooltip": GGUF_TOOLTIP}),
+                "n_ctx": ("INT", {"default": 32768, "min": 2048, "max": 262144, "step": 1024, "tooltip": CTX_TOOLTIP}),
+                "n_gpu_layers": ("INT", {"default": -1, "min": -1, "max": 999, "step": 1, "tooltip": LAYERS_TOOLTIP}),
+                "chat_format": ("STRING", {"default": "", "tooltip": "留空用模型自带模板；个别 GGUF 需手动指定，如 chatml。"}),
+                "keep_model_loaded": ("BOOLEAN", {"default": True, "tooltip": KEEP_TOOLTIP}),
+                "seed": ("INT", {"default": -1, "min": -1, "max": 2 ** 63 - 1, "step": 1, "tooltip": "-1 不固定；固定 seed 便于复现。"}),
+                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.05, "tooltip": "核采样阈值。"}),
+                "temperature": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip": TEMP_TOOLTIP}),
+                "max_tokens": ("INT", {"default": 2048, "min": 64, "max": 32768, "step": 64, "tooltip": MAXTOK_TOOLTIP}),
+                "language": (["English", "中文", "Bilingual"], {"tooltip": LANG_TOOLTIP}),
+                "output_format": (["auto", "caption", "tag", "layout"], {"tooltip": FORMAT_TOOLTIP}),
+                "extra_instruction": ("STRING", {"multiline": True, "default": "", "tooltip": EXTRA_TOOLTIP}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING", "STRING", "INT", "INT")
+    RETURN_NAMES = ("optimized_prompt", "size_note", "width", "height")
+    FUNCTION = "optimize"
+    CATEGORY = CATEGORY
+
+    def optimize(self, prompt, skill, gguf_model, n_ctx, n_gpu_layers, chat_format,
+                 keep_model_loaded, seed, top_p, temperature, max_tokens,
+                 language, output_format, extra_instruction):
+        sender = _llamacpp_sender(gguf_model, n_ctx, n_gpu_layers, chat_format,
+                                  keep_model_loaded, seed, temperature, top_p, max_tokens)
+        return _generate(prompt, skill, extra_instruction, language, output_format, sender)

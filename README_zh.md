@@ -20,9 +20,13 @@
 
 | 节点 | 作用 |
 |---|---|
-| **Skill Prompt Optimizer** | 快速上手。任意 OpenAI 兼容端点，技能下拉 + 自定义技能覆盖，输出提示词与画布尺寸。 |
-| **Skill Prompt Optimizer (Advanced)** | 同上，另加 `backend = http \| llama_cpp`、GGUF 模型选择、`n_ctx`、`n_gpu_layers`、`seed`、`top_p`、`keep_model_loaded`。 |
-| **Skill Prompt Layout Compiler** | 接收 LLM 的 Layout **草稿**（`abs` / `xyxy`），输出最终单行 JSON（`abs_centralized` / `yxyx` 整数），并做结构校验。 |
+| **Skill Prompt Optimizer** | HTTP 快速上手：`prompt` + `skill` + `base_url` + `model`，加语言/格式/基础采样。 |
+| **Skill Prompt Optimizer (Advanced)** | HTTP 版，多一个 `top_p`。 |
+| **Skill Prompt Optimizer (llama.cpp)** | 进程内 GGUF：`gguf_model`、`n_ctx`、`n_gpu_layers`、`keep_model_loaded`。 |
+| **Skill Prompt Optimizer (llama.cpp Advanced)** | 再加 `chat_format`、`seed`、`top_p`，可复现。 |
+| **Skill Prompt Layout Compiler** | 接收 Layout **草稿**（`abs` / `xyxy`），输出最终单行 JSON（`abs_centralized` / `yxyx` 整数），并做结构校验。 |
+
+两个后端各用独立节点：一个节点只显示它真正用到的参数，没有 `backend` 开关，也没有隐藏的覆盖项。
 
 ---
 
@@ -79,8 +83,9 @@ skills/
 - 每个技能是一个含 `SKILL.md` 的目录，文件全文作为 system 消息。
 - 可选 `meta.json`：`{"display_name": "...", "language": "zh+en", "notes": "..."}`。
 - 额外技能目录：设环境变量 `SKILLPROMPT_SKILL_DIRS`（路径分隔符分隔）。
-- `custom_skill` 文本框可临时覆盖下拉选择。
 - 新增技能需要重启 ComfyUI（下拉框在加载时构建）。
+- 只想临时加要求？用 `extra_instruction`（只追加）。要改规则本身，就建一个技能目录——
+  这样工作流历史里留下的是“用了哪份规则书”，而不是藏在文本框里的内容。
 
 > **安全提示**：技能只是文本指导，节点不会执行技能里的任何东西；但它会作为 system
 > 提示词注入，不受信任的技能等于提示注入。第三方技能请当第三方代码对待。

@@ -21,9 +21,14 @@ Two things make this different from a generic "prompt enhancer":
 
 | Node | What it does |
 |---|---|
-| **Skill Prompt Optimizer** | Quick start. Any OpenAI-compatible endpoint, skill dropdown, custom-skill override. Outputs the prompt plus a canvas size. |
-| **Skill Prompt Optimizer (Advanced)** | Same, but `backend = http \| llama_cpp`, GGUF model picker, `n_ctx`, `n_gpu_layers`, `seed`, `top_p`, `keep_model_loaded`. |
+| **Skill Prompt Optimizer** | HTTP quick start: `prompt` + `skill` + `base_url` + `model`, plus language / format / sampling basics. |
+| **Skill Prompt Optimizer (Advanced)** | HTTP with `top_p` added. |
+| **Skill Prompt Optimizer (llama.cpp)** | In-process GGUF: `gguf_model`, `n_ctx`, `n_gpu_layers`, `keep_model_loaded`. |
+| **Skill Prompt Optimizer (llama.cpp Advanced)** | Adds `chat_format`, `seed`, `top_p` — reproducible runs. |
 | **Skill Prompt Layout Compiler** | Takes the LLM's Layout *draft* (`bbox_coord_space="abs"`, `bbox_format="xyxy"`) and emits the final one-line JSON (`abs_centralized` / `yxyx`, integers), with structural validation. |
+
+Each backend has its own nodes on purpose: a node only shows the widgets it uses, and
+there is no `backend` switch or hidden override anywhere.
 
 ---
 
@@ -82,8 +87,10 @@ skills/
 - Each skill is a folder containing `SKILL.md`; the file text becomes the system message.
 - Optional `meta.json`: `{"display_name": "...", "language": "zh+en", "notes": "..."}`.
 - Extra skill folders: set `SKILLPROMPT_SKILL_DIRS` (path-separator separated).
-- The `custom_skill` text box overrides the dropdown for one-off instructions.
 - Adding a skill requires a ComfyUI restart (the dropdown is built at load time).
+- Need to bend the rules for one run? Use `extra_instruction` (appends). To change the
+  rules themselves, make a skill folder — that keeps the exact rulebook in the workflow
+  history instead of hiding it in a text box.
 
 > **Security note:** skills are *text guidance only* — the node never executes anything
 > from them. But they are injected as the system prompt, so an untrusted skill can steer
