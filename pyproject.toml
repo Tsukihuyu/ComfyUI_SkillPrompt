@@ -12,8 +12,8 @@ keywords = ["comfyui", "prompt", "llm", "skill", "layout", "qwen", "anime"]
 Repository = "https://github.com/Tsukihuyu/ComfyUI_SkillPrompt"
 Issues = "https://github.com/Tsukihuyu/ComfyUI_SkillPrompt/issues"
 
-# Fill PublisherId with your Comfy Registry publisher id before `comfy node publish`.
+# PublisherId must exist on registry.comfy.org before publishing.
 [tool.comfy]
-PublisherId = ""
+PublisherId = "chiduki-huyu"
 DisplayName = "SkillPrompt"
 Icon = ""
