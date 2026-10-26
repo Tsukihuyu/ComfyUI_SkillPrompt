@@ -1,6 +1,8 @@
 """Canvas in/out behaviour — no network, fake backend."""
 
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -8,7 +10,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from nodes.optimizer import _build_messages, _check_canvas, _generate  # noqa: E402
 
-SKILL = "moss-anime-prompt-slim"
+# The repo ships no skills, so build a throwaway one for these tests.
+_FIXTURE_ROOT = Path(tempfile.mkdtemp(prefix="skillprompt_canvas_"))
+(_FIXTURE_ROOT / "test-skill").mkdir(parents=True, exist_ok=True)
+(_FIXTURE_ROOT / "test-skill" / "SKILL.md").write_text(
+    "# test rulebook\n\nWrite one art-style sentence, then the subject.\n", encoding="utf-8"
+)
+_existing = os.environ.get("SKILLPROMPT_SKILL_DIRS", "")
+os.environ["SKILLPROMPT_SKILL_DIRS"] = os.pathsep.join(
+    p for p in (_existing, str(_FIXTURE_ROOT)) if p
+)
+
+SKILL = "test-skill"
 
 
 class FakeSender:

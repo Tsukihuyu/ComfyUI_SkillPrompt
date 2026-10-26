@@ -1,8 +1,8 @@
 """End-to-end check: run the node's core against a profile from skillprompt.ini.
 
   python tests/e2e_optimize.py --list                      # show configured profiles
-  python tests/e2e_optimize.py --profile "A 机 27B（快）" --format caption
-  python tests/e2e_optimize.py --profile local-router --format layout --width 1024 --height 1536
+  python tests/e2e_optimize.py --profile "local llama.cpp" --format caption
+  python tests/e2e_optimize.py --profile lmstudio --format layout --width 1024 --height 1536
 """
 
 import argparse
@@ -31,7 +31,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--list", action="store_true", help="print configured profiles and exit")
     ap.add_argument("--profile", default=None, help="display name from skillprompt.ini")
-    ap.add_argument("--skill", default="moss-anime-prompt-slim")
+    ap.add_argument("--skill", default=None, help="skill folder name under skills/")
     ap.add_argument("--format", default="caption", choices=["auto", "caption", "tag", "layout"])
     ap.add_argument("--language", default="English", choices=["English", "中文", "Bilingual"])
     ap.add_argument("--prompt", default=None)
@@ -57,10 +57,23 @@ def main() -> int:
 
     prompt = args.prompt or (POSTER if args.prompt_preset == "poster" else HOSHINO)
 
+    skill = args.skill
+    if not skill:
+        from nodes.skills import PLACEHOLDER, skill_choices
+
+        available = [s for s in skill_choices() if s != PLACEHOLDER]
+        if not available:
+            raise SystemExit(
+                "skills/ 里没有可用的技能。先建一个 skills/<名称>/SKILL.md（见 skills/README.md），"
+                "或用 --skill 指定。"
+            )
+        skill = available[0]
+        print(f"[e2e] using skill: {skill}")
+
     node = SkillPromptOptimizer()
     text, size_note, width, height = node.optimize(
         prompt=prompt,
-        skill=args.skill,
+        skill=skill,
         llm_model=args.profile,
         width=args.width,
         height=args.height,

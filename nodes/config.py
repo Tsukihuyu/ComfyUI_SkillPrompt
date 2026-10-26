@@ -4,9 +4,9 @@ The node exposes one ``llm_model`` dropdown built from this file; the URL and th
 API key never appear as widgets. Every ``[section]`` is one dropdown entry.
 
     [local-router]                     ; section name = stable id
-    name = A 机 27B                    ; display name (optional, Chinese ok)
-    base_url = http://192.168.51.14:8491/v1
-    model = Ukisai-Swift-1.5-Qwen3.8-27B-Q6_K_L-MTP
+    name = local llama.cpp             ; display name (optional, any language)
+    base_url = http://127.0.0.1:8491/v1
+    model = YOUR-MODEL-NAME
     api_key =                          ; optional for local servers
     api_key_env = DEEPSEEK_API_KEY     ; optional, takes precedence over api_key
 

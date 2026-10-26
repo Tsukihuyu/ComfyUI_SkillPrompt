@@ -1,0 +1,27 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit tests (no network, no ComfyUI)
+        run: |
+          python tests/test_promptkit.py
+          python tests/test_canvas.py
+          python tests/test_thinking.py
+          python tests/test_unload.py
+          python tests/test_config.py
+          python tests/test_workflow.py

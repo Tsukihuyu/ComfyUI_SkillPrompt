@@ -35,8 +35,8 @@
       "properties": {"Node name for S&R": "SkillPromptOptimizer"},
       "widgets_values": [
         "backless cheongsam, hoshino (blue archive), 1girl, heterochromia, fang, pink hair, ahoge, low twintails, pink halo, looking at viewer, white backless short cheongsam, full body, white high-heel sandals, open meadow, sakura tree in full bloom, falling petals, blue sky, dappled sunlight",
-        "moss-anime-prompt-slim",
-        "A 机 27B（快）",
+        "your-skill",
+        "local-llamacpp",
         0,
         0,
         true,

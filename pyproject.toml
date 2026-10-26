@@ -1,16 +1,18 @@
 [project]
 name = "comfyui-skillprompt"
-version = "0.1.0"
-description = "Drive prompt writing with markdown skills: an LLM rewrites your idea into a structured positive prompt, and a deterministic compiler turns Layout drafts into exact coordinates."
+version = "1.0.0"
+description = "Write prompts from a markdown rulebook: an OpenAI-compatible LLM rewrites your idea into a structured positive prompt, plus a deterministic Layout compiler. Endpoints live in skillprompt.ini."
 license = {text = "MIT"}
 requires-python = ">=3.10"
 dependencies = []
 readme = "README.md"
-keywords = ["comfyui", "prompt", "llm", "skill", "anime", "layout"]
+keywords = ["comfyui", "prompt", "llm", "skill", "layout", "qwen", "anime"]
 
 [project.urls]
 Repository = "https://github.com/CHANGE_ME/ComfyUI_SkillPrompt"
+Issues = "https://github.com/CHANGE_ME/ComfyUI_SkillPrompt/issues"
 
+# Fill PublisherId with your Comfy Registry publisher id before `comfy node publish`.
 [tool.comfy]
 PublisherId = ""
 DisplayName = "SkillPrompt"

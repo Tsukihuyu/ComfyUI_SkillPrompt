@@ -1,30 +1,26 @@
 # SkillPrompt for ComfyUI
 
-**写提示词靠规则，不靠玄学。**
+**写提示词靠规则书，不靠玄学。**
 
-把一段粗糙的想法——一串 tag、一句需求、一段中文描述——交给 **大语言模型 + markdown 技能**，
-按技能里写好的规则重写成结构化的正向提示词。所谓“技能”就是一份完整的写词规则书
-（规则、格式、示例，动辄几千到两万 tokens）。仓库自带 MOSS 二次元提示词模板，你也可以
-把自己的规则书丢进去，不用改一行代码。
+把一段粗糙的想法——一串 tag、一句需求、一段中文描述——交给节点，它经过 **LLM + markdown 技能**
+（一份完整的写词规则书 `SKILL.md`）重写成结构化正向提示词，直接接 `CLIPTextEncode`。
 
 和普通“提示词增强器”的两点不同：
 
-1. **模板忠实度**：技能全文原样作为 system 提示词，完整规则书（21k tokens）也支持，
-   小上下文模型可用精简版。
-2. **确定性 Layout 编译器**：LLM 只负责“设计版式”，所有坐标算术交给 Python 做——
-   可校验、可测试、可复现。
+1. **模板忠实度**：技能全文就是 system 提示词，原样使用。两万 token 的规则书和十行的规则书
+   一样能跑；单次微调交给 `extra_instruction`，它是**追加**，不会静默覆盖技能。
+2. **确定性 Layout 编译器**：LLM 只负责“设计版式”，所有坐标换算交给 Python，可校验、可测试。
 
 ---
 
-## 三个节点
+## 两个节点
 
 | 节点 | 作用 |
 |---|---|
-| **Skill Prompt Optimizer** | OpenAI 兼容 HTTP 端点（Ollama / LM Studio / llama.cpp server / 云端）。 |
-| **Skill Prompt Layout Compiler** | 接收 Layout **草稿**（`abs` / `xyxy`），输出最终单行 JSON（`abs_centralized` / `yxyx` 整数），并做结构校验。 |
+| **Skill Prompt Optimizer** | 用配置好的端点和技能重写提示词，输出提示词本身，以及本次解析出的画布尺寸。 |
+| **Skill Prompt Layout Compiler** | 把 Layout **草稿**（`bbox_coord_space="abs"`、`bbox_format="xyxy"`）编译成最终单行 JSON（`abs_centralized` / `yxyx` 整数），并做结构校验。 |
 
-刻意不提供进程内 GGUF 后端：llama-cpp-python 无法关闭 Qwen3 系模型的思考（那个开关只存在于
-`llama-server`），留着就是一条永远半残的路径。把 `base_url` 指向真正的服务端即可。
+不加载本地模型、不打包运行时：节点就是一个零依赖的客户端，连你自己已经在跑的服务。
 
 ---
 
@@ -32,130 +28,111 @@
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone <本仓库>
-# 重启 ComfyUI
+git clone https://github.com/<你>/ComfyUI_SkillPrompt.git
+cp ComfyUI_SkillPrompt/skillprompt.ini.example ComfyUI_SkillPrompt/skillprompt.ini
+# 编辑 skillprompt.ini，然后重启 ComfyUI
 ```
 
-零依赖（只用 `urllib`，Python ≥ 3.10）。
+Python ≥ 3.10，**零 pip 依赖**（只用 `urllib`）。在 ComfyUI 0.42.x 上验证过。
 
 ---
 
 ## 端点：`skillprompt.ini`
 
-节点不显示地址、不显示 key。端点在节点目录的 `skillprompt.ini` 里，一个 `[段]` 对应下拉框一项：
+节点界面上没有地址、没有 API key —— 它们都在 `skillprompt.ini` 里，一个 `[段]` 对应下拉框一项：
 
 ```ini
-[local-llamacpp]                     ; 段名 = 稳定 id；没有 name 时直接显示段名
-name = 本地 llama.cpp 27B            ; 下拉框显示名，可以写中文
-base_url = http://127.0.0.1:8491/v1  ; OpenAI 兼容端点，写到 /v1 为止
-model = Ukisai-Swift-1.5-Qwen3.8-27B-Q6_K_L-MTP
-api_key =                            ; 可选，本地服务通常不用
+[local-llamacpp]                     ; 段名 = 稳定 id
+name = 本地 llama.cpp 27B            ; 下拉框显示名
+base_url = http://127.0.0.1:8491/v1  ; OpenAI 兼容端点，写到 /v1
+model = YOUR-MODEL-NAME
 
 [deepseek]
-name = DeepSeek 云端
+name = DeepSeek
 base_url = https://api.deepseek.com/v1
 model = deepseek-chat
-api_key_env = DEEPSEEK_API_KEY       ; 从环境变量读 key，不落盘
+api_key_env = DEEPSEEK_API_KEY       ; key 从环境变量读，不落盘
 ```
 
-- 复制 `skillprompt.ini.example` 成 `skillprompt.ini`，取消你要用的段的注释。
-- 以 `example` 开头的段会被忽略，可以放心当笔记用。
-- 缺 `base_url` 或 `model` 的段会被跳过。
-- `SKILLPROMPT_CONFIG=<路径>` 可改配置文件位置。
+- 支持 llama.cpp（router 或普通 server）、LM Studio、Ollama、vLLM、DeepSeek、OpenAI，
+  凡是会说 `/v1/chat/completions` 的都行。
+- `example*` 开头的段会被忽略；缺 `base_url` 或 `model` 的段会被跳过。
+- 有 `api_key` 就用它；`api_key_env` 优先级更高，可以把 key 完全留在系统环境里。
+- `SKILLPROMPT_CONFIG=<路径>` 可以指向别的 ini。
 - **改完要重启 ComfyUI**（下拉框在加载时构建）。
-- `skillprompt.ini` 已进 .gitignore：里面是地址，也可能有 key。
+- `skillprompt.ini` 已进 `.gitignore`，请保持这样。
 
 ---
 
-## 快速开始
+## 技能
 
-1. 复制 `skillprompt.ini.example` 为 `skillprompt.ini`，填一个端点。
-2. 添加 **Skill Prompt Optimizer**，选 `skill`（小上下文用 `moss-anime-prompt-slim`，
-   32k 以上用 `moss-anime-prompt`），再选 `llm_model`。
-3. 粘进粗糙提示词，选 `output_format`（`auto` / `caption` / `tag` / `layout`），运行。
-   把 `optimized_prompt` 接到 `CLIPTextEncode`。
+`skills/` 下每个含 `SKILL.md` 的文件夹就是一个技能，文件全文作为 system 消息。
+格式见 [`skills/README.md`](skills/README.md)，里面有一个最小骨架。
+
+**本仓库不附带任何提示词文本**——流传的那几份二次元提示词模板是各自作者的作品，
+版权归原作者。请自备规则书。
+
+- 额外技能目录：环境变量 `SKILLPROMPT_SKILL_DIRS`（路径分隔符分隔）。
+- 新增技能后重启 ComfyUI。
+- 技能只是文本指导，节点不会执行其中任何东西；但它确实是 system 提示词，
+  所以第三方技能要当第三方代码对待。
 
 ---
 
-## 技能目录
+## 画布：`width` / `height` 既是输入也是输出
 
-```
-skills/
-  moss-anime-prompt/SKILL.md        # 完整模板（约 21k tokens，需 ≥32k 上下文）
-  moss-anime-prompt-slim/SKILL.md   # §17 提取（约 4k tokens，适配 16k 上下文）
-  your-skill/SKILL.md               # 你自己的规则书
-```
+| 取值 | 行为 |
+|---|---|
+| `> 0` | 固定画布：作为硬性构图约束写给模型（Layout 模式下同时是 bbox 边界），并原样回显到输出。 |
+| `0` | 自动：由模型决定，尺寸从它自己写的 `CANVAS: WxH` 行解析回来。 |
 
-- 每个技能是一个含 `SKILL.md` 的目录，文件全文作为 system 消息。
-- 可选 `meta.json`：`{"display_name": "...", "language": "zh+en", "notes": "..."}`。
-- 额外技能目录：设环境变量 `SKILLPROMPT_SKILL_DIRS`（路径分隔符分隔）。
-- 新增技能需要重启 ComfyUI（下拉框在加载时构建）。
-- 只想临时加要求？用 `extra_instruction`（只追加）。要改规则本身，就建一个技能目录——
-  这样工作流历史里留下的是“用了哪份规则书”，而不是藏在文本框里的内容。
-
-> **安全提示**：技能只是文本指导，节点不会执行技能里的任何东西；但它会作为 system
-> 提示词注入，不受信任的技能等于提示注入。第三方技能请当第三方代码对待。
+要么都填，要么都不填。Layout 模式要求 16 的倍数（模板的坐标换算需要整数中心）。
+把输出接到 `EmptyLatentImage` 和编译器，整张图才对同一个尺寸有共识。
 
 ---
 
 ## Layout 流水线
 
-MOSS 这类模板把 Layout 拆成“草稿 → 最终”。LLM 的算术不可信，编译器可信。
-
-1. 可选：先设 `width` / `height`。`>0` 表示固定画布——尺寸作为构图约束写进用户消息，Layout 模式下同时是 bbox 的硬边界（`0<=x1<=W`），输出回显这两个数；`0` 表示交给模型决定。
-2. 设 `output_format = layout`，节点会在用户消息里附加流水线契约：先出草稿 JSON
+1. 设 `output_format = layout`，节点会附加流水线契约：先输出**草稿** JSON
    （`width`、`height`、`bbox_coord_space="abs"`、`bbox_format="xyxy"`、`summary`、`items`），
    再另起一行 `CANVAS: WxH`。
-3. 节点把 `CANVAS:` 行从正文里摘出来，画布尺寸通过 `size_note` / `width` / `height` 输出。
-4. 把提示词正文接进 **Skill Prompt Layout Compiler**。编译器会：
-   - 把 `[x0,y0,x1,y1]` 转成 `[y0-H/2, x0-W/2, y1-H/2, x1-W/2]`；
-   - 小数边先左/上取整向下、右/下取整向上；
-   - 丢弃 schema 外的根字段，校验 `label` 枚举、`text` 项、框面积、越界、16 倍数画布；
-   - 输出单行紧凑 JSON + 人类可读的 `status`。
+2. 节点把这行摘掉，尺寸通过输出暴露出去。
+3. 把提示词正文接进 **Skill Prompt Layout Compiler**。它把
+   `[x0,y0,x1,y1]` 转成 `[y0-H/2, x0-W/2, y1-H/2, x1-W/2]`，小数边先取整，丢弃 schema 外字段，
+   校验 `label` 枚举、`text` 项、框面积、画布越界与 16 倍数规则，
+   输出一行紧凑 JSON 加一份可读状态。
 
-示例（1024×1024，单项 `[100,320,440,760]`）：
-
-```json
-{"summary":{...},"items":[{"label":"object","caption":"...","bbox":[-192,-412,248,-72]}],"bbox_coord_space":"abs_centralized","bbox_format":"yxyx"}
-```
+LLM 的算术不可信，这一步可信——编译器自己就有二十来项单元测试。
 
 ---
 
-## 参数说明
+## 其他开关
 
 | 参数 | 含义 |
 |---|---|
-| `width` / `height` | **既是输入也是输出。** `>0` = 固定画布：尺寸作为硬性构图约束写给模型（Layout 模式下同时是 bbox 边界），输出原样回显。`0` = 自动：由模型决定，尺寸从 `CANVAS:` 行解析。两边要么都填，要么都不填。Layout 模式要求 16 的倍数。 |
-| `disable_thinking` | **默认开启。** 发送 `chat_template_kwargs={"enable_thinking": false}`（vLLM / SGLang / llama.cpp server / LM Studio 支持），服务端不认该字段时自动重试并改用提示词 `/no_think`。只有确实想要模型先推理时才关掉——同样的提示词会多花成倍的 token 和时间。 |
-| `language` | `English`（默认）/ `中文` / `Bilingual`（两份完整版本） |
-| `output_format` | `auto` 由技能自行判断；`caption` / `tag` / `layout` 强制格式 |
-| `temperature` | 0.5 是遵循规则的好起点 |
-| `top_p` | 0.9 一般够用，很少需要动 |
-| `max_tokens` | **要留余量**：思考型模型大半 token 花在隐藏推理上。正文像被截断时，看控制台的 `finish_reason=length` 警告并调大它 |
-| `unload_after_run` | **默认开启。** 提示词写完（成功或失败）后请求服务端卸载模型：`POST {root}/models/unload`（llama.cpp router）、`POST {root}/api/v1/models/unload`（LM Studio）、`POST {root}/api/generate` 带 `keep_alive: 0`（Ollama）。云端端点只会返回"无此端点"，不影响结果。连续批量写词时关掉它。 |
+| `disable_thinking` | **默认开启。** 发送 `chat_template_kwargs={"enable_thinking": false}`（llama.cpp server / LM Studio / vLLM / SGLang 支持）；服务端不认该字段时自动退回 `/no_think` 后缀重试。只有确实想要推理过程时才关掉。 |
+| `unload_after_run` | **默认开启。** 写完提示词就让服务端卸载模型，把显存让给出图模型：`POST {root}/models/unload`（llama.cpp router）、`POST {root}/api/v1/models/unload`（LM Studio）、`POST {root}/api/generate` 带 `keep_alive: 0`（Ollama）。云端端点只会回报“无此端点”。连续批量写词时关掉。 |
+| `temperature` / `top_p` | 遵循规则的话 0.5 / 0.9 是好起点。 |
+| `max_tokens` | **要留余量。** 思考型模型大半 token 花在隐藏推理上；撞到 `finish_reason=length` 时控制台会警告。 |
+| `language` | `English`（默认）/ `中文` / `Bilingual`（两份各自完整的版本）。 |
+| `output_format` | `auto` 由技能判断；`caption` / `tag` / `layout` 强制格式。 |
 
 ---
 
 ## 已知边界（不粉饰）
 
-- **上下文**：完整 MOSS 模板约 21k tokens，32k 以下的上下文请用精简版。
-- **模型质量**：14B 以下遵循长规则的能力掉得很快，完整模板建议 27B 级起步。
-- **延迟**：首次调用要为整份规则书付 prefill；之后能命中服务端前缀缓存就快
-  （llama.cpp 系支持，实测 usage 里能看到 `cached_tokens`）。
-- **LLM 算术不可信**：坐标换算一律交给编译器。
-- **思考型模型**：`disable_thinking` 默认开启，写提示词就该这么用。如果某个端点既不认
-  `chat_template_kwargs` 也不认 `/no_think`，把不带标签的推理直接混进 `content`，节点无法区分
-  哪段是推理——这种只能在服务端解决（换成非 thinking 版本的模型）。带 `` 标签的块会自动剥掉。
+- **模型规模有下限。** 14B 以下遵循长规则的能力掉得很快；两万 token 的规则书建议 27B 级起步。
+- **首次调用慢。** 第一次要为整份规则书付 prefill；服务端有前缀缓存时后续会快（`usage` 里的 `cached_tokens` 能看到）。
+- **思考型模型**：如果某个端点既不认 `chat_template_kwargs` 也不认 `/no_think`，还把无标签的推理
+  直接混进 `content`，节点分辨不出来——只能在服务端解决。带标签的 `think` 块会被自动剥掉。
+- **卸载支持视服务端而定**：不在列表里的服务端只会回报一句“无此端点”，不影响结果。
 - **不是局部重绘工具**：编译器重算坐标，不修改像素。
 
 ---
 
-## 致谢
+## 致谢与许可
 
-- 自带技能文本：**MOSS 二次元提示词模板（sfw版）**，作者 是古手梨花sama（B站），逐字收录并署名。
-- 架构参考：[ComfyUI_Qwen_H3_Prompt](https://github.com/chflame163/ComfyUI_Qwen_H3_Prompt)（MIT）、
-  [ComfyUI-QwenVL](https://github.com/1038lab/ComfyUI-QwenVL)（GPL-3.0）。本项目为独立实现，未复制其代码。
+MIT（见 `LICENSE`）。
 
-## 许可
-
-MIT（见 `LICENSE`）。自带 MOSS 模板文本的权利归原作者。
+设计参考：[ComfyUI_Qwen_H3_Prompt](https://github.com/chflame163/ComfyUI_Qwen_H3_Prompt)（MIT）、
+[ComfyUI-QwenVL](https://github.com/1038lab/ComfyUI-QwenVL)（GPL-3.0）。本项目为独立实现，未复制其代码。

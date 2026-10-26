@@ -1,24 +1,55 @@
 """Structural checks for the shipped example workflow (no ComfyUI required)."""
 
 import json
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT.parent))  # the node package is imported by folder name
 
-import ComfyUI_SkillPrompt as pkg  # noqa: E402
+SKILL_NAME = "your-skill"
+PROFILE_ID = "local-llamacpp"
 
-WORKFLOW = ROOT / "example_workflows" / "skillprompt_moss_basic.json"
+# The repo ships neither skills nor an ini, so give the node throwaway ones.
+_SKILL_ROOT = Path(tempfile.mkdtemp(prefix="skillprompt_wf_skill_"))
+(_SKILL_ROOT / SKILL_NAME).mkdir(parents=True, exist_ok=True)
+(_SKILL_ROOT / SKILL_NAME / "SKILL.md").write_text("# rulebook\n", encoding="utf-8")
+_existing = os.environ.get("SKILLPROMPT_SKILL_DIRS", "")
+os.environ["SKILLPROMPT_SKILL_DIRS"] = os.pathsep.join(
+    p for p in (_existing, str(_SKILL_ROOT)) if p
+)
+
+import ComfyUI_SkillPrompt as pkg  # noqa: E402
+from ComfyUI_SkillPrompt.nodes import config as cfg  # noqa: E402
+
+_INI = Path(tempfile.mkdtemp(prefix="skillprompt_wf_ini_")) / "skillprompt.ini"
+_INI.write_text(
+    f"[{PROFILE_ID}]\nbase_url = http://127.0.0.1:9999/v1\nmodel = test-model\n",
+    encoding="utf-8",
+)
+
+WORKFLOW = ROOT / "example_workflows" / "skillprompt_basic.json"
 
 
 class TestExampleWorkflow(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls._orig_config = cfg.CONFIG_PATH
+        cfg.CONFIG_PATH = _INI
+        cfg._CACHE["stamp"] = None
+
         cls.wf = json.loads(WORKFLOW.read_text(encoding="utf-8"))
         cls.nodes = {n["id"]: n for n in cls.wf["nodes"]}
         cls.links = {l[0]: l for l in cls.wf["links"]}
+
+    @classmethod
+    def tearDownClass(cls):
+        cfg.CONFIG_PATH = cls._orig_config
+        cfg._CACHE["stamp"] = None
+        cfg._CACHE["profiles"] = {}
 
     def test_unique_ids(self):
         self.assertEqual(len(self.nodes), len(self.wf["nodes"]))

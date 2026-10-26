@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 TSUKI / ComfyUI_SkillPrompt contributors
+Copyright (c) 2026 ComfyUI_SkillPrompt contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -22,9 +22,5 @@ SOFTWARE.
 
 ---
 
-Third-party content shipped with this repository:
-
-skills/moss-anime-prompt/SKILL.md and skills/moss-anime-prompt-slim/SKILL.md
-are the "MOSS 二次元提示词模板（sfw版）" prompt-writing rulebook by
-是古手梨花sama (Bilibili), included verbatim with attribution. Rights to that
-text remain with its author.
+This repository ships no third-party prompt text. Skills are user-supplied
+markdown rulebooks; see skills/README.md.

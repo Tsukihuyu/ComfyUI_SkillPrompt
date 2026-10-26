@@ -1,68 +1,86 @@
-# 部署与自测清单
+# 部署与自测
 
-## 1. 拷到 ComfyUI
+## 1. 放进 custom_nodes
 
-Windows（在能访问 A 机的机器上执行；路径按你的实际安装改）：
-
-```bat
-robocopy "D:\Hermes\projects\ComfyUI_SkillPrompt" "\\192.168.51.14\D$\GAME\ComfyUI\ComfyUI\custom_nodes\ComfyUI_SkillPrompt" /E /XD .git __pycache__
+```bash
+cd ComfyUI/custom_nodes
+git clone <repository-url> ComfyUI_SkillPrompt
+cd ComfyUI_SkillPrompt
+cp skillprompt.ini.example skillprompt.ini
 ```
 
-在 A 本机上则直接：
+然后编辑 `skillprompt.ini`，至少填一段：
 
-```bat
-robocopy "D:\Hermes\projects\ComfyUI_SkillPrompt" "D:\GAME\ComfyUI\ComfyUI\custom_nodes\ComfyUI_SkillPrompt" /E /XD .git __pycache__
+```ini
+[local-llamacpp]
+name = local llama.cpp
+base_url = http://127.0.0.1:8491/v1
+model = YOUR-MODEL-NAME
 ```
 
-> `.git` 和 `__pycache__` 不拷也行；代码只依赖标准库。
+## 2. 准备一个技能
 
-## 2. 重启 ComfyUI
+`skills/` 里默认是空的（本仓库不附带提示词文本）。新建：
+
+```
+skills/my-rules/SKILL.md
+```
+
+内容就是你的写词规则书，见 `skills/README.md` 里的最小骨架。
+
+## 3. 重启 ComfyUI
 
 自定义节点在启动时导入，必须重启进程（刷新浏览器不算）。
 
-## 3. 确认节点出现
+## 4. 确认节点出现
 
 右键菜单 → `SkillPrompt` 分类下应有两个：
 
 - `Skill Prompt Optimizer`
 - `Skill Prompt Layout Compiler`
 
-`llm_model` 下拉框里应能看到 `skillprompt.ini` 里配置的端点（例如 `A 机 27B（快）`）。
-如果只有占位符 `(no endpoint configured - edit skillprompt.ini)`，说明 ini 没拷或没填。
+检查点：
 
-## 4. 五分钟自测
-
-打开 `example_workflows/skillprompt_moss_basic.json`，改两处：
-
-| 字段 | 改成 |
+| 项 | 期望 |
 |---|---|
-| Checkpoint | 你机器上实际有的 |
-| `llm_model` | 选 ini 里的 `A 机 27B（快）`（先确认 `skillprompt.ini` 存在且有这一段） |
-| `disable_thinking` | 保持 `true`（关掉思考，输出才是干净的提示词） |
-| `unload_after_run` | 保持 `true`（写完立即卸载，把显存让给出图） |
+| `llm_model` 下拉框 | 列出 `skillprompt.ini` 里的段；只有 `(no endpoint configured - edit skillprompt.ini)` 说明 ini 没填 |
+| `skill` 下拉框 | 列出 `skills/` 下的文件夹；只有占位符说明没有放 `SKILL.md` |
 
-然后 Queue。控制台应出现：
+## 5. 五分钟自测
+
+1. `prompt` 里写：「一个穿红裙的女孩站在雨夜巷口，路灯是橘色的」。
+2. `output_format` 选 `caption`，`language` 选 `English`，其余默认。
+3. 运行。控制台应出现：
 
 ```
-[SkillPrompt] skill=moss-anime-prompt-slim (~3892 tok) est_tokens≈...
-[SkillPrompt] usage={'completion_tokens': ..., 'prompt_tokens': ..., 'finish_reason': 'stop'}
+[SkillPrompt] endpoint=... model=...
+[SkillPrompt] skill=... (~N tok) est_tokens≈... format=caption lang=English canvas=auto
+[SkillPrompt] usage={... 'finish_reason': 'stop'}
+[SkillPrompt] 已释放显存：...
 ```
 
-## 5. 出问题时看哪儿
+4. 把 `optimized_prompt` 接到 `CLIPTextEncode`，下游正常出图。
+
+## 6. 出问题时看哪儿
 
 | 现象 | 大概率原因 | 处理 |
 |---|---|---|
-| 节点没出现在菜单里 | 导入失败 | 看 ComfyUI 启动日志的 Traceback，把最后 20 行发我 |
-| `skills` 下拉框是占位符 `(no skill found...)` | `skills/` 没拷全 | 确认 `custom_nodes/ComfyUI_SkillPrompt/skills/moss-anime-prompt/SKILL.md` 存在 |
-| 报“连不上” | router 端口/模型名不对 | `curl http://127.0.0.1:8491/v1/models` 先确认 |
-| 正文写到一半停了 | max_tokens 被隐藏推理吃掉 | 看有没有 `finish_reason=length` 警告，把 max_tokens 调到 4096 |
-| `HTTP 400 context length` | 完整版 skill 塞不下 | 换 `moss-anime-prompt-slim` |
-| Layout 编译报“不是 16 的倍数” | 模型给了 1000×1500 之类 | 把 width/height 改成 1024×1536 |
+| 节点没出现在菜单里 | 导入失败 | 看 ComfyUI 启动日志最后的 Traceback |
+| `llm_model` 只有占位符 | ini 不存在或没有有效段 | 确认 `skillprompt.ini` 在同一目录，段里同时有 `base_url` 和 `model` |
+| `skill` 只有占位符 | `skills/` 里没有 `SKILL.md` | 建 `skills/<名称>/SKILL.md` |
+| 报“连不上” | 端点没起 / 端口错 | `curl <base_url>/models` 先确认 |
+| 报 HTTP 400 context | 规则书太长，模型上下文不够 | 换更短的技能，或换大上下文模型 |
+| 正文写到一半停了 | `max_tokens` 被隐藏推理吃掉 | 看 `finish_reason=length` 警告，调大 `max_tokens`，或打开 `disable_thinking` |
+| 还在输出思考过程 | 端点既不吃 `chat_template_kwargs` 也不吃 `/no_think` | 在服务端换成非 thinking 模型 |
+| 出图 OOM | 模型没卸载 | 确认 `unload_after_run=true`，并看控制台的卸载回执 |
+| Layout 编译报“不是 16 的倍数” | 画布尺寸不对 | 改成 1024×1024 / 1536×1024 / 1024×1536 之类 |
+| 改了 ini 不生效 | 没有重启 | 重启 ComfyUI |
 
-## 6. 想验 Layout 编译器
+## 7. 命令行的等价检查
 
-`output_format` 设 `layout`，提示词写“咖啡海报：上方标题「星海咖啡」，左边红杯，右边蓝礼盒”。
-第二个节点的 `text` 接第一个节点的 `optimized_prompt`，`width`/`height` 接它的同名输出。
+不需要开着 ComfyUI，也能验端点与技能是否配好：
 
-期望：`layout_json` 是一行紧凑 JSON，根字段只有 `summary` / `items` / `bbox_coord_space` / `bbox_format`；
-`status` 以 `已编译：画布 1024x1024，N 项` 开头。
+```bash
+python tests/e2e_optimize.py --list
+python tests/e2e_optimize.py --profile "local llama.cpp" --format caption
+```
