@@ -41,6 +41,7 @@ def main() -> int:
     ap.add_argument("--max-tokens", type=int, default=2048)
     ap.add_argument("--width", type=int, default=0, help="0 = auto canvas")
     ap.add_argument("--height", type=int, default=0, help="0 = auto canvas")
+    ap.add_argument("--keep-thinking", action="store_true", help="do not disable model thinking")
     args = ap.parse_args()
 
     prompt = args.prompt or (POSTER if args.prompt_preset == "poster" else HOSHINO)
@@ -51,6 +52,7 @@ def main() -> int:
         skill=args.skill,
         width=args.width,
         height=args.height,
+        disable_thinking=not args.keep_thinking,
         base_url=args.base_url,
         model=args.model,
         api_key=args.api_key,

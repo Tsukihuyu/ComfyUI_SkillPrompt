@@ -130,6 +130,7 @@ Example output (1024×1024, one item at `[100,320,440,760]`):
 | Parameter | Meaning |
 |---|---|
 | `width` / `height` | **In and out.** `>0` = fixed canvas: the size is passed to the model as a hard composition constraint (and the bbox bounds in Layout mode), and echoed back on the outputs. `0` = auto: the model picks the canvas and the size is parsed from its `CANVAS:` line. Fill both or neither. Layout mode requires multiples of 16. |
+| `disable_thinking` | **On by default.** Sends `chat_template_kwargs={"enable_thinking": false}` (vLLM / SGLang / llama.cpp server / LM Studio); if a server rejects the field it retries once with a `/no_think` prompt suffix. Turn it off only if you actually want the reasoning pass — it costs far more tokens and time for the same prompt. |
 | `language` | `English` (default), `中文`, `Bilingual` (two complete versions) |
 | `output_format` | `auto` lets the skill decide; `caption` / `tag` / `layout` force a format |
 | `temperature` | 0.5 is a good starting point for rule-following |
@@ -150,6 +151,11 @@ Example output (1024×1024, one item at `[100,320,440,760]`):
   in usage).
 - **LLM arithmetic**: never trust an LLM to convert coordinates. That is what the
   compiler is for.
+- **Thinking models**: `disable_thinking` is on by default and is the intended setting for
+  prompt rewriting. If an endpoint honours neither `chat_template_kwargs` nor `/no_think`
+  and inlines untagged reasoning into `content`, the node cannot tell prose from prompt —
+  disable thinking on the server side (e.g. load the non-thinking variant of the model).
+  Tagged `<think>` blocks are stripped automatically.
 - **Not a local image editor**: the compiler re-derives coordinates; it does not edit
   pixels.
 

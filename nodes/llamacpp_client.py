@@ -1,9 +1,11 @@
 """Optional in-process llama.cpp backend (llama-cpp-python).
 
 Nothing here is imported eagerly: if ``llama_cpp`` is not installed the node
-falls back to the HTTP backend and reports a clear install hint. Models are
-cached per (path, n_ctx, n_gpu_layers, chat_format) so repeated runs do not
-reload 20 GB of weights.
+still works and reports a clear install hint. Models are cached per
+(path, n_ctx, n_gpu_layers, chat_format) so repeated runs do not reload weights.
+
+Thinking models: ``disable_thinking`` tries ``chat_template_kwargs`` first and
+falls back to a ``/no_think`` prompt suffix for builds that reject it.
 """
 
 from __future__ import annotations
@@ -13,6 +15,8 @@ import os
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from .http_client import no_think_messages
 
 _LOCK = threading.Lock()
 _MODELS: Dict[Tuple, object] = {}
@@ -113,6 +117,11 @@ def _load(model_name: str, n_ctx: int, n_gpu_layers: int, chat_format: str):
     return inst
 
 
+def _looks_like_unsupported_kwarg(err: Exception) -> bool:
+    msg = str(err).lower()
+    return any(k in msg for k in ("chat_template_kwargs", "unexpected keyword", "invalid keyword", "unknown argument"))
+
+
 def chat_completion(
     model_name: str,
     messages: List[Dict[str, str]],
@@ -124,6 +133,7 @@ def chat_completion(
     max_tokens: int = 2048,
     seed: int = -1,
     keep_model_loaded: bool = True,
+    disable_thinking: bool = False,
 ) -> Tuple[str, Optional[Dict]]:
     if not available():
         raise RuntimeError(
@@ -131,7 +141,7 @@ def chat_completion(
             "安装示例（Windows，需与本机 CUDA 匹配的 wheel）：\n"
             "  pip install llama-cpp-python --extra-index-url "
             "https://abetlen.github.io/llama-cpp-python/whl/cu124\n"
-            "或者把 backend 切到 http，用 LM Studio / llama-server / Ollama。"
+            "或者把节点换成 HTTP 版，用 LM Studio / llama-server / Ollama。"
         )
     if model_name == PLACEHOLDER:
         raise ValueError(
@@ -140,14 +150,27 @@ def chat_completion(
         )
 
     inst = _load(model_name, n_ctx, n_gpu_layers, chat_format)
+    common = dict(
+        temperature=float(temperature),
+        top_p=float(top_p),
+        max_tokens=int(max_tokens),
+        seed=int(seed),
+    )
     try:
-        out = inst.create_chat_completion(
-            messages=messages,
-            temperature=float(temperature),
-            top_p=float(top_p),
-            max_tokens=int(max_tokens),
-            seed=int(seed),
-        )
+        if disable_thinking:
+            try:
+                out = inst.create_chat_completion(
+                    messages=messages,
+                    chat_template_kwargs={"enable_thinking": False},
+                    **common,
+                )
+            except Exception as e:  # noqa: BLE001 - only swallow the kwarg case
+                if not _looks_like_unsupported_kwarg(e):
+                    raise
+                print("[SkillPrompt] 当前 llama-cpp-python 不支持 chat_template_kwargs，改用 /no_think。")
+                out = inst.create_chat_completion(messages=no_think_messages(messages), **common)
+        else:
+            out = inst.create_chat_completion(messages=messages, **common)
     finally:
         if not keep_model_loaded:
             unload_all()
@@ -157,7 +180,10 @@ def chat_completion(
         raise RuntimeError(f"llama.cpp 返回里没有 choices：{str(out)[:400]}")
     text = (choices[0].get("message") or {}).get("content") or ""
     if not text.strip():
-        raise RuntimeError(f"llama.cpp 返回空内容（finish_reason={choices[0].get('finish_reason')}）")
+        raise RuntimeError(
+            f"llama.cpp 返回空内容（finish_reason={choices[0].get('finish_reason')}）。"
+            "打开 disable_thinking 或调大 max_tokens 再试。"
+        )
     return text, (out or {}).get("usage")
 
 

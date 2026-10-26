@@ -118,6 +118,7 @@ MOSS 这类模板把 Layout 拆成“草稿 → 最终”。LLM 的算术不可�
 | 参数 | 含义 |
 |---|---|
 | `width` / `height` | **既是输入也是输出。** `>0` = 固定画布：尺寸作为硬性构图约束写给模型（Layout 模式下同时是 bbox 边界），输出原样回显。`0` = 自动：由模型决定，尺寸从 `CANVAS:` 行解析。两边要么都填，要么都不填。Layout 模式要求 16 的倍数。 |
+| `disable_thinking` | **默认开启。** 发送 `chat_template_kwargs={"enable_thinking": false}`（vLLM / SGLang / llama.cpp server / LM Studio 支持），服务端不认该字段时自动重试并改用提示词 `/no_think`。只有确实想要模型先推理时才关掉——同样的提示词会多花成倍的 token 和时间。 |
 | `language` | `English`（默认）/ `中文` / `Bilingual`（两份完整版本） |
 | `output_format` | `auto` 由技能自行判断；`caption` / `tag` / `layout` 强制格式 |
 | `temperature` | 0.5 是遵循规则的好起点 |
@@ -135,6 +136,9 @@ MOSS 这类模板把 Layout 拆成“草稿 → 最终”。LLM 的算术不可�
 - **延迟**：首次调用要为整份规则书付 prefill；之后能命中服务端前缀缓存就快
   （llama.cpp 系支持，实测 usage 里能看到 `cached_tokens`）。
 - **LLM 算术不可信**：坐标换算一律交给编译器。
+- **思考型模型**：`disable_thinking` 默认开启，写提示词就该这么用。如果某个端点既不认
+  `chat_template_kwargs` 也不认 `/no_think`，把不带标签的推理直接混进 `content`，节点无法区分
+  哪段是推理——这种只能在服务端解决（换成非 thinking 版本的模型）。带 `` 标签的块会自动剥掉。
 - **不是局部重绘工具**：编译器重算坐标，不修改像素。
 
 ---

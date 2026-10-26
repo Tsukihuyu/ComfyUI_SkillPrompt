@@ -1,8 +1,7 @@
-"""SkillPrompt optimizer nodes.
+"""SkillPrompt optimizer nodes (canvas in/out, thinking switch).
 
-One node per backend (no standard/advanced split — the only difference was a
-couple of sliders nobody wanted two nodes for):
-
+Backends
+--------
   SkillPromptOptimizer            OpenAI-compatible HTTP endpoint
   SkillPromptOptimizerLlamaCpp    in-process llama.cpp (GGUF)
 
@@ -13,13 +12,16 @@ Canvas contract
 * input > 0  -> the canvas is fixed. The size is handed to the model as a hard
   composition constraint (and, for Layout, as the bbox bounds). The outputs echo
   the input; whatever size the model claims is ignored (mismatches are logged).
-* input == 0 -> auto. The model picks the canvas itself and the size is parsed
-  back out of the ``CANVAS: WxH`` line. This is the original behaviour.
+* input == 0 -> auto. The model picks the canvas and the size is parsed back out
+  of the ``CANVAS: WxH`` line.
 * both must be 0 or both > 0.
 
-There is deliberately no "custom_skill" input: a skill is always a folder with a
-SKILL.md, so the rulebook a workflow used stays visible, versionable and reusable.
-Per-run tweaks belong in ``extra_instruction``, which appends and never overrides.
+Thinking switch
+---------------
+``disable_thinking`` defaults to True: prompt rewriting wants the answer, not the
+chain of thought. The HTTP backend sends ``chat_template_kwargs={"enable_thinking":
+false}`` (understood by vLLM / SGLang / llama.cpp server / LM Studio) and falls back
+to a ``/no_think`` prompt suffix when a server rejects the field.
 """
 
 from __future__ import annotations
@@ -62,6 +64,10 @@ LAYERS_TOOLTIP = "-1 表示全部层放 GPU；显存不够时调小。"
 KEEP_TOOLTIP = "True 保留模型在显存里加速下一次；显存紧张时关掉。"
 WIDTH_TOOLTIP = "画布宽。＞0 时作为硬约束交给模型，并原样输出；0 = 让模型自己决定（从 CANVAS 行解析）。Layout 模式要求 16 的倍数。"
 HEIGHT_TOOLTIP = "画布高。＞0 时作为硬约束交给模型，并原样输出；0 = 让模型自己决定。Layout 模式要求 16 的倍数。"
+THINK_TOOLTIP = (
+    "关闭模型思考。开：发送 chat_template_kwargs={enable_thinking:false}（vLLM / llama.cpp server / LM Studio 支持），"
+    "服务端不认时自动退回提示词 /no_think。关：允许模型先思考（更慢、更耗 token，输出可能夹带推理过程）。"
+)
 
 Sender = Callable[[List[Dict[str, str]], int], Tuple[str, Any]]
 
@@ -194,13 +200,14 @@ def _generate(
 
 
 def _http_sender(base_url: str, api_key: str, model: str, temperature: float,
-                 top_p: float, max_tokens: int, timeout: int) -> Sender:
+                 top_p: float, max_tokens: int, timeout: int, disable_thinking: bool) -> Sender:
     def sender(messages: List[Dict[str, str]], est: int):
         if est > 24000:
             print(f"[SkillPrompt] 警告：系统提示约 {est} tokens，确认服务端上下文窗口够大（≥32k 更稳妥）。")
         return http_client.chat_completion(
             base_url=base_url, api_key=api_key, model=model, messages=messages,
             temperature=temperature, top_p=top_p, max_tokens=max_tokens, timeout=timeout,
+            disable_thinking=disable_thinking,
         )
 
     return sender
@@ -208,7 +215,7 @@ def _http_sender(base_url: str, api_key: str, model: str, temperature: float,
 
 def _llamacpp_sender(gguf_model: str, n_ctx: int, n_gpu_layers: int, chat_format: str,
                      keep_model_loaded: bool, seed: int, temperature: float,
-                     top_p: float, max_tokens: int) -> Sender:
+                     top_p: float, max_tokens: int, disable_thinking: bool) -> Sender:
     def sender(messages: List[Dict[str, str]], est: int):
         need = est + int(max_tokens) + 256
         if int(n_ctx) < need:
@@ -221,6 +228,7 @@ def _llamacpp_sender(gguf_model: str, n_ctx: int, n_gpu_layers: int, chat_format
             n_gpu_layers=int(n_gpu_layers), chat_format=chat_format or "",
             temperature=float(temperature), top_p=float(top_p), max_tokens=int(max_tokens),
             seed=int(seed), keep_model_loaded=bool(keep_model_loaded),
+            disable_thinking=bool(disable_thinking),
         )
 
     return sender
@@ -240,6 +248,7 @@ class SkillPromptOptimizer:
                 "skill": (skill_choices(), {"tooltip": SKILL_TOOLTIP}),
                 "width": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 16, "tooltip": WIDTH_TOOLTIP}),
                 "height": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 16, "tooltip": HEIGHT_TOOLTIP}),
+                "disable_thinking": ("BOOLEAN", {"default": True, "tooltip": THINK_TOOLTIP}),
                 "base_url": ("STRING", {"default": DEFAULT_BASE_URL, "tooltip": BASEURL_TOOLTIP}),
                 "model": ("STRING", {"default": "", "tooltip": "服务端实际暴露的模型名。"}),
                 "api_key": ("STRING", {"default": "", "tooltip": "本地端点留空；云端服务填 key。"}),
@@ -258,10 +267,11 @@ class SkillPromptOptimizer:
     FUNCTION = "optimize"
     CATEGORY = CATEGORY
 
-    def optimize(self, prompt, skill, width, height, base_url, model, api_key,
-                 language, output_format, temperature, top_p, max_tokens, timeout,
-                 extra_instruction):
-        sender = _http_sender(base_url, api_key, model, temperature, top_p, max_tokens, timeout)
+    def optimize(self, prompt, skill, width, height, disable_thinking, base_url, model,
+                 api_key, language, output_format, temperature, top_p, max_tokens,
+                 timeout, extra_instruction):
+        sender = _http_sender(base_url, api_key, model, temperature, top_p, max_tokens,
+                              timeout, disable_thinking)
         return _generate(prompt, skill, extra_instruction, language, output_format,
                          width, height, sender)
 
@@ -280,6 +290,7 @@ class SkillPromptOptimizerLlamaCpp:
                 "skill": (skill_choices(), {"tooltip": SKILL_TOOLTIP}),
                 "width": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 16, "tooltip": WIDTH_TOOLTIP}),
                 "height": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 16, "tooltip": HEIGHT_TOOLTIP}),
+                "disable_thinking": ("BOOLEAN", {"default": True, "tooltip": THINK_TOOLTIP}),
                 "gguf_model": (llamacpp_client.list_gguf_models(), {"tooltip": GGUF_TOOLTIP}),
                 "n_ctx": ("INT", {"default": 32768, "min": 2048, "max": 262144, "step": 1024, "tooltip": CTX_TOOLTIP}),
                 "n_gpu_layers": ("INT", {"default": -1, "min": -1, "max": 999, "step": 1, "tooltip": LAYERS_TOOLTIP}),
@@ -300,10 +311,11 @@ class SkillPromptOptimizerLlamaCpp:
     FUNCTION = "optimize"
     CATEGORY = CATEGORY
 
-    def optimize(self, prompt, skill, width, height, gguf_model, n_ctx, n_gpu_layers,
-                 chat_format, keep_model_loaded, seed, temperature, top_p, max_tokens,
-                 language, output_format, extra_instruction):
+    def optimize(self, prompt, skill, width, height, disable_thinking, gguf_model, n_ctx,
+                 n_gpu_layers, chat_format, keep_model_loaded, seed, temperature, top_p,
+                 max_tokens, language, output_format, extra_instruction):
         sender = _llamacpp_sender(gguf_model, n_ctx, n_gpu_layers, chat_format,
-                                  keep_model_loaded, seed, temperature, top_p, max_tokens)
+                                  keep_model_loaded, seed, temperature, top_p, max_tokens,
+                                  disable_thinking)
         return _generate(prompt, skill, extra_instruction, language, output_format,
                          width, height, sender)

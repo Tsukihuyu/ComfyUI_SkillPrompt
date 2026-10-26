@@ -39,6 +39,7 @@ robocopy "D:\Hermes\projects\ComfyUI_SkillPrompt" "D:\GAME\ComfyUI\ComfyUI\custo
 | Checkpoint | 你机器上实际有的 |
 | `base_url` | `http://127.0.0.1:8491/v1`（A 机自己的 router） |
 | `model` | `Ukisai-Swift-1.5-Qwen3.8-27B-Q6_K_L-MTP` |
+| `disable_thinking` | 保持 `true`（关掉思考，输出才是干净的提示词） |
 
 然后 Queue。控制台应出现：
 

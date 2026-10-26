@@ -38,6 +38,7 @@
         "moss-anime-prompt-slim",
         0,
         0,
+        true,
         "http://127.0.0.1:11434/v1",
         "qwen2.5:14b-instruct",
         "",

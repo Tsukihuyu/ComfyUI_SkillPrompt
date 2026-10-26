@@ -25,6 +25,8 @@ SIZE_RE = re.compile(
 )
 
 LAYOUT_LABELS = {"character", "object", "text"}
+THINK_BLOCK_RE = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.S | re.I)
+THINK_BARE_TAG_RE = re.compile(r"</?think(?:ing)?>", re.I)
 ALLOWED_ROOT_DRAFT = {"width", "height", "bbox_coord_space", "bbox_format", "summary", "items"}
 ALLOWED_ROOT_FINAL = {"summary", "items", "bbox_coord_space", "bbox_format"}
 ALLOWED_ROWS = {"label", "caption", "bbox", "text", "tags", "palette"}
@@ -63,6 +65,16 @@ def _match_size_line(line: str) -> Optional[Tuple[int, int]]:
     return None
 
 
+def _strip_think_blocks(text: str) -> Tuple[str, List[str]]:
+    """Drop ``...`` blocks some servers inline into ``content``."""
+    notes: List[str] = []
+    cleaned = THINK_BLOCK_RE.sub("", text)
+    if cleaned != text:
+        notes.append("剥掉了 think 标签内的思考块")
+    cleaned = THINK_BARE_TAG_RE.sub("", cleaned).strip()
+    return cleaned, notes
+
+
 def sanitize_output(text: str) -> Dict[str, Any]:
     """Unwrap code fences, pull the canvas-size line out of the prompt body."""
     notes: List[str] = []
@@ -70,6 +82,8 @@ def sanitize_output(text: str) -> Dict[str, Any]:
         return {"prompt": "", "width": 0, "height": 0, "notes": ["模型返回了空内容"]}
 
     body = text.strip()
+    body, think_notes = _strip_think_blocks(body)
+    notes.extend(think_notes)
     unwrapped = strip_outer_fence(body)
     if unwrapped != body:
         notes.append("剥掉了整段代码围栏")
