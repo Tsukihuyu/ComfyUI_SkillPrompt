@@ -1,0 +1,6 @@
+# Files kept in git but excluded from the Comfy Registry archive.
+# .gitignore already handles everything untracked.
+tests/
+.github/
+*.py[cod]
+__pycache__/
