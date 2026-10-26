@@ -22,11 +22,11 @@ Two things make this different from a generic "prompt enhancer":
 | Node | What it does |
 |---|---|
 | **Skill Prompt Optimizer** | OpenAI-compatible HTTP endpoint (Ollama / LM Studio / llama.cpp server / cloud). |
-| **Skill Prompt Optimizer (llama.cpp)** | In-process GGUF backend: `gguf_model`, `n_ctx`, `n_gpu_layers`, `chat_format`, `seed`. |
 | **Skill Prompt Layout Compiler** | Takes the LLM's Layout *draft* (`bbox_coord_space="abs"`, `bbox_format="xyxy"`) and emits the final one-line JSON (`abs_centralized` / `yxyx`, integers), with structural validation. |
 
-One node per backend: a node only shows the widgets it uses, and there is no `backend`
-switch or hidden override anywhere.
+There is deliberately no in-process GGUF backend: llama-cpp-python cannot turn off
+thinking for Qwen3-style models (that switch only exists in `llama-server`), so it would
+be a permanently half-working path. Point `base_url` at a real server instead.
 
 ---
 
@@ -38,16 +38,7 @@ git clone <this repo>
 # restart ComfyUI
 ```
 
-No pip dependencies for the HTTP backend (`urllib` only, Python ≥ 3.10).
-
-Optional, for the in-process llama.cpp backend:
-
-```bash
-pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
-```
-
-(Wheel suffix must match your CUDA runtime. Without `llama-cpp-python` the node still
-works — the `llama_cpp` backend just reports an install hint.)
+No pip dependencies at all (`urllib` only, Python ≥ 3.10).
 
 ---
 
@@ -136,8 +127,7 @@ Example output (1024×1024, one item at `[100,320,440,760]`):
 | `temperature` | 0.5 is a good starting point for rule-following |
 | `top_p` | 0.9 is a sane default; rarely worth touching |
 | `max_tokens` | **Headroom matters**: thinking models spend most tokens on hidden reasoning. If the text looks cut off, check the console for the `finish_reason=length` warning and raise this. |
-| `n_ctx` | llama.cpp only. The node refuses to run when skill + prompt + `max_tokens` exceed it, and tells you the numbers. |
-| `keep_model_loaded` | llama.cpp only. `false` unloads and frees VRAM after every run. |
+| `unload_after_run` | **On by default.** After the prompt is written (success or failure), ask the server to drop the model: `POST {root}/models/unload` (llama.cpp router), `POST {root}/api/v1/models/unload` (LM Studio), `POST {root}/api/generate` with `keep_alive: 0` (Ollama). Cloud endpoints simply report "no unload endpoint". Turn it off when writing many prompts in a row. |
 
 ---
 

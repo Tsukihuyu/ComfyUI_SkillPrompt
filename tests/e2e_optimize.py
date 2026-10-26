@@ -42,6 +42,7 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=0, help="0 = auto canvas")
     ap.add_argument("--height", type=int, default=0, help="0 = auto canvas")
     ap.add_argument("--keep-thinking", action="store_true", help="do not disable model thinking")
+    ap.add_argument("--keep-loaded", action="store_true", help="do not unload the model after the run")
     args = ap.parse_args()
 
     prompt = args.prompt or (POSTER if args.prompt_preset == "poster" else HOSHINO)
@@ -62,6 +63,7 @@ def main() -> int:
         top_p=0.9,
         max_tokens=args.max_tokens,
         timeout=args.timeout,
+        unload_after_run=not args.keep_loaded,
         extra_instruction="",
     )
 

@@ -22,10 +22,9 @@ robocopy "D:\Hermes\projects\ComfyUI_SkillPrompt" "D:\GAME\ComfyUI\ComfyUI\custo
 
 ## 3. 确认节点出现
 
-右键菜单 → `SkillPrompt` 分类下应有三个：
+右键菜单 → `SkillPrompt` 分类下应有两个：
 
-- `Skill Prompt Optimizer`（HTTP）
-- `Skill Prompt Optimizer (llama.cpp)`
+- `Skill Prompt Optimizer`
 - `Skill Prompt Layout Compiler`
 
 启动日志里应该能看到一条 `[SkillPrompt] skills: ...`（首次建下拉框时扫描）。
@@ -40,6 +39,7 @@ robocopy "D:\Hermes\projects\ComfyUI_SkillPrompt" "D:\GAME\ComfyUI\ComfyUI\custo
 | `base_url` | `http://127.0.0.1:8491/v1`（A 机自己的 router） |
 | `model` | `Ukisai-Swift-1.5-Qwen3.8-27B-Q6_K_L-MTP` |
 | `disable_thinking` | 保持 `true`（关掉思考，输出才是干净的提示词） |
+| `unload_after_run` | 保持 `true`（写完立即卸载，把显存让给出图） |
 
 然后 Queue。控制台应出现：
 

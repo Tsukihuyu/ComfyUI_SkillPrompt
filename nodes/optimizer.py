@@ -1,34 +1,39 @@
-"""SkillPrompt optimizer nodes (canvas in/out, thinking switch).
+"""SkillPrompt optimizer node (HTTP only).
 
-Backends
---------
-  SkillPromptOptimizer            OpenAI-compatible HTTP endpoint
-  SkillPromptOptimizerLlamaCpp    in-process llama.cpp (GGUF)
+Any OpenAI-compatible endpoint: llama.cpp router/server, LM Studio, Ollama,
+vLLM, DeepSeek, OpenAI, ...
 
 Canvas contract
 ---------------
 ``width`` / ``height`` are BOTH an input and an output:
 
-* input > 0  -> the canvas is fixed. The size is handed to the model as a hard
-  composition constraint (and, for Layout, as the bbox bounds). The outputs echo
-  the input; whatever size the model claims is ignored (mismatches are logged).
+* input > 0  -> fixed canvas. Handed to the model as a hard composition
+  constraint (and, for Layout, as the bbox bounds). The outputs echo the input;
+  a size the model claims differently is logged and ignored.
 * input == 0 -> auto. The model picks the canvas and the size is parsed back out
   of the ``CANVAS: WxH`` line.
 * both must be 0 or both > 0.
 
 Thinking switch
 ---------------
-``disable_thinking`` defaults to True: prompt rewriting wants the answer, not the
-chain of thought. The HTTP backend sends ``chat_template_kwargs={"enable_thinking":
-false}`` (understood by vLLM / SGLang / llama.cpp server / LM Studio) and falls back
-to a ``/no_think`` prompt suffix when a server rejects the field.
+``disable_thinking`` defaults on: prompt rewriting wants the answer, not the
+chain of thought. Sends ``chat_template_kwargs={"enable_thinking": false}``
+(understood by llama.cpp server / LM Studio / vLLM / SGLang) and falls back to a
+``/no_think`` prompt suffix when a server rejects the field.
+
+VRAM
+----
+``unload_after_run`` (default on) asks the server to drop the model once the
+prompt is written, because the next step in a ComfyUI graph is usually the image
+model on the same GPU. See ``nodes/unload.py`` for the per-server endpoint.
 """
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import http_client, llamacpp_client
+from . import http_client
+from . import unload as unload_mod
 from .promptkit import sanitize_output
 from .skills import estimate_tokens, get_skill, skill_choices
 
@@ -58,15 +63,16 @@ TOPP_TOOLTIP = "核采样阈值，一般 0.9。"
 MAXTOK_TOOLTIP = "思考型模型会先花大量 token 在隐藏推理上，2048 起步更稳。"
 TIMEOUT_TOOLTIP = "单次请求超时（秒）。本地 27B + 完整模板首次 prefill 可能要一两分钟。"
 BASEURL_TOOLTIP = "OpenAI 兼容端点，如 http://127.0.0.1:11434/v1（Ollama）、http://127.0.0.1:8491/v1（llama.cpp router）。"
-GGUF_TOOLTIP = "ComfyUI/models/LLM/ 下的 .gguf。缺模型可设环境变量 SKILLPROMPT_GGUF_DIRS。"
-CTX_TOOLTIP = "上下文窗口。完整版 skill 约 21k tokens，建议 32768 起步。"
-LAYERS_TOOLTIP = "-1 表示全部层放 GPU；显存不够时调小。"
-KEEP_TOOLTIP = "True 保留模型在显存里加速下一次；显存紧张时关掉。"
 WIDTH_TOOLTIP = "画布宽。＞0 时作为硬约束交给模型，并原样输出；0 = 让模型自己决定（从 CANVAS 行解析）。Layout 模式要求 16 的倍数。"
 HEIGHT_TOOLTIP = "画布高。＞0 时作为硬约束交给模型，并原样输出；0 = 让模型自己决定。Layout 模式要求 16 的倍数。"
 THINK_TOOLTIP = (
-    "关闭模型思考。开：发送 chat_template_kwargs={enable_thinking:false}（vLLM / llama.cpp server / LM Studio 支持），"
-    "服务端不认时自动退回提示词 /no_think。关：允许模型先思考（更慢、更耗 token，输出可能夹带推理过程）。"
+    "关闭模型思考。开：发送 chat_template_kwargs={enable_thinking:false}（llama.cpp server / LM Studio / vLLM 支持），"
+    "服务端不认时自动退回提示词 /no_think。关：允许模型先思考（更慢、更耗 token）。"
+)
+UNLOAD_TOOLTIP = (
+    "写完后让服务端卸载模型，把显存让给出图模型。自动尝试 llama.cpp（/models/unload）、"
+    "LM Studio（/api/v1/models/unload）、Ollama（keep_alive=0）；云端端点会返回“不支持”，不影响结果。"
+    "连续批量写词时关掉它，避免每次重新加载。"
 )
 
 Sender = Callable[[List[Dict[str, str]], int], Tuple[str, Any]]
@@ -154,6 +160,7 @@ def _generate(
     width: int,
     height: int,
     sender: Sender,
+    on_finish: Optional[Callable[[], None]] = None,
 ) -> Tuple[str, str, int, int]:
     """Shared pipeline: resolve skill -> build messages -> call backend -> sanitise."""
     _check_canvas(width, height, output_format)
@@ -171,7 +178,11 @@ def _generate(
     messages = _build_messages(
         prompt, skill_text, language, output_format, extra_instruction, int(width), int(height)
     )
-    text, usage = sender(messages, est)
+    try:
+        text, usage = sender(messages, est)
+    finally:
+        if on_finish is not None:
+            on_finish()
 
     if usage:
         print(f"[SkillPrompt] usage={usage}")
@@ -199,44 +210,6 @@ def _generate(
     return clean["prompt"], size_note, out_w, out_h
 
 
-def _http_sender(base_url: str, api_key: str, model: str, temperature: float,
-                 top_p: float, max_tokens: int, timeout: int, disable_thinking: bool) -> Sender:
-    def sender(messages: List[Dict[str, str]], est: int):
-        if est > 24000:
-            print(f"[SkillPrompt] 警告：系统提示约 {est} tokens，确认服务端上下文窗口够大（≥32k 更稳妥）。")
-        return http_client.chat_completion(
-            base_url=base_url, api_key=api_key, model=model, messages=messages,
-            temperature=temperature, top_p=top_p, max_tokens=max_tokens, timeout=timeout,
-            disable_thinking=disable_thinking,
-        )
-
-    return sender
-
-
-def _llamacpp_sender(gguf_model: str, n_ctx: int, n_gpu_layers: int, chat_format: str,
-                     keep_model_loaded: bool, seed: int, temperature: float,
-                     top_p: float, max_tokens: int, disable_thinking: bool) -> Sender:
-    def sender(messages: List[Dict[str, str]], est: int):
-        need = est + int(max_tokens) + 256
-        if int(n_ctx) < need:
-            raise ValueError(
-                f"上下文不够：skill + 提示词约 {est} tokens，加 max_tokens={max_tokens} 需要 ≥ {need}，"
-                f"当前 n_ctx={n_ctx}。把 n_ctx 调大（注意显存），或改用精简版 skill。"
-            )
-        return llamacpp_client.chat_completion(
-            model_name=gguf_model, messages=messages, n_ctx=int(n_ctx),
-            n_gpu_layers=int(n_gpu_layers), chat_format=chat_format or "",
-            temperature=float(temperature), top_p=float(top_p), max_tokens=int(max_tokens),
-            seed=int(seed), keep_model_loaded=bool(keep_model_loaded),
-            disable_thinking=bool(disable_thinking),
-        )
-
-    return sender
-
-
-# --------------------------------------------------------------------------- #
-# HTTP backend
-# --------------------------------------------------------------------------- #
 class SkillPromptOptimizer:
     """Any OpenAI-compatible endpoint (Ollama / LM Studio / llama.cpp / cloud)."""
 
@@ -258,6 +231,7 @@ class SkillPromptOptimizer:
                 "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.05, "tooltip": TOPP_TOOLTIP}),
                 "max_tokens": ("INT", {"default": 2048, "min": 64, "max": 32768, "step": 64, "tooltip": MAXTOK_TOOLTIP}),
                 "timeout": ("INT", {"default": 600, "min": 30, "max": 3600, "step": 30, "tooltip": TIMEOUT_TOOLTIP}),
+                "unload_after_run": ("BOOLEAN", {"default": True, "tooltip": UNLOAD_TOOLTIP}),
                 "extra_instruction": ("STRING", {"multiline": True, "default": "", "tooltip": EXTRA_TOOLTIP}),
             }
         }
@@ -269,53 +243,21 @@ class SkillPromptOptimizer:
 
     def optimize(self, prompt, skill, width, height, disable_thinking, base_url, model,
                  api_key, language, output_format, temperature, top_p, max_tokens,
-                 timeout, extra_instruction):
-        sender = _http_sender(base_url, api_key, model, temperature, top_p, max_tokens,
-                              timeout, disable_thinking)
+                 timeout, unload_after_run, extra_instruction):
+        def sender(messages, est):
+            if est > 24000:
+                print(f"[SkillPrompt] 警告：系统提示约 {est} tokens，确认服务端上下文窗口够大（≥32k 更稳妥）。")
+            return http_client.chat_completion(
+                base_url=base_url, api_key=api_key, model=model, messages=messages,
+                temperature=temperature, top_p=top_p, max_tokens=max_tokens, timeout=timeout,
+                disable_thinking=disable_thinking,
+            )
+
+        def on_finish():
+            if not unload_after_run:
+                return
+            ok, detail = unload_mod.unload_model(base_url, api_key, model, timeout=10)
+            print(f"[SkillPrompt] {'已释放显存：' if ok else '卸载未完成：'}{detail}")
+
         return _generate(prompt, skill, extra_instruction, language, output_format,
-                         width, height, sender)
-
-
-# --------------------------------------------------------------------------- #
-# llama.cpp backend
-# --------------------------------------------------------------------------- #
-class SkillPromptOptimizerLlamaCpp:
-    """In-process llama.cpp backend (requires llama-cpp-python)."""
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "prompt": ("STRING", {"multiline": True, "default": "", "tooltip": PROMPT_TOOLTIP}),
-                "skill": (skill_choices(), {"tooltip": SKILL_TOOLTIP}),
-                "width": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 16, "tooltip": WIDTH_TOOLTIP}),
-                "height": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 16, "tooltip": HEIGHT_TOOLTIP}),
-                "disable_thinking": ("BOOLEAN", {"default": True, "tooltip": THINK_TOOLTIP}),
-                "gguf_model": (llamacpp_client.list_gguf_models(), {"tooltip": GGUF_TOOLTIP}),
-                "n_ctx": ("INT", {"default": 32768, "min": 2048, "max": 262144, "step": 1024, "tooltip": CTX_TOOLTIP}),
-                "n_gpu_layers": ("INT", {"default": -1, "min": -1, "max": 999, "step": 1, "tooltip": LAYERS_TOOLTIP}),
-                "chat_format": ("STRING", {"default": "", "tooltip": "留空用模型自带模板；个别 GGUF 需手动指定，如 chatml。"}),
-                "keep_model_loaded": ("BOOLEAN", {"default": True, "tooltip": KEEP_TOOLTIP}),
-                "seed": ("INT", {"default": -1, "min": -1, "max": 2 ** 63 - 1, "step": 1, "tooltip": "-1 不固定；固定 seed 便于复现。"}),
-                "temperature": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip": TEMP_TOOLTIP}),
-                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "step": 0.05, "tooltip": TOPP_TOOLTIP}),
-                "max_tokens": ("INT", {"default": 2048, "min": 64, "max": 32768, "step": 64, "tooltip": MAXTOK_TOOLTIP}),
-                "language": (["English", "中文", "Bilingual"], {"tooltip": LANG_TOOLTIP}),
-                "output_format": (["auto", "caption", "tag", "layout"], {"tooltip": FORMAT_TOOLTIP}),
-                "extra_instruction": ("STRING", {"multiline": True, "default": "", "tooltip": EXTRA_TOOLTIP}),
-            }
-        }
-
-    RETURN_TYPES = ("STRING", "STRING", "INT", "INT")
-    RETURN_NAMES = ("optimized_prompt", "size_note", "width", "height")
-    FUNCTION = "optimize"
-    CATEGORY = CATEGORY
-
-    def optimize(self, prompt, skill, width, height, disable_thinking, gguf_model, n_ctx,
-                 n_gpu_layers, chat_format, keep_model_loaded, seed, temperature, top_p,
-                 max_tokens, language, output_format, extra_instruction):
-        sender = _llamacpp_sender(gguf_model, n_ctx, n_gpu_layers, chat_format,
-                                  keep_model_loaded, seed, temperature, top_p, max_tokens,
-                                  disable_thinking)
-        return _generate(prompt, skill, extra_instruction, language, output_format,
-                         width, height, sender)
+                         width, height, sender, on_finish)

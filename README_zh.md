@@ -21,10 +21,10 @@
 | 节点 | 作用 |
 |---|---|
 | **Skill Prompt Optimizer** | OpenAI 兼容 HTTP 端点（Ollama / LM Studio / llama.cpp server / 云端）。 |
-| **Skill Prompt Optimizer (llama.cpp)** | 进程内 GGUF 后端：`gguf_model`、`n_ctx`、`n_gpu_layers`、`chat_format`、`seed`。 |
 | **Skill Prompt Layout Compiler** | 接收 Layout **草稿**（`abs` / `xyxy`），输出最终单行 JSON（`abs_centralized` / `yxyx` 整数），并做结构校验。 |
 
-一个后端一个节点：节点只显示它真正用到的参数，没有 `backend` 开关，也没有隐藏的覆盖项。
+刻意不提供进程内 GGUF 后端：llama-cpp-python 无法关闭 Qwen3 系模型的思考（那个开关只存在于
+`llama-server`），留着就是一条永远半残的路径。把 `base_url` 指向真正的服务端即可。
 
 ---
 
@@ -36,15 +36,7 @@ git clone <本仓库>
 # 重启 ComfyUI
 ```
 
-HTTP 后端零依赖（只用 `urllib`，Python ≥ 3.10）。
-
-可选的内置 llama.cpp 后端：
-
-```bash
-pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
-```
-
-（wheel 后缀要与本机 CUDA 匹配。没装也能用，切到 `llama_cpp` 后端时节点会直接告诉你装法。）
+零依赖（只用 `urllib`，Python ≥ 3.10）。
 
 ---
 
@@ -124,8 +116,7 @@ MOSS 这类模板把 Layout 拆成“草稿 → 最终”。LLM 的算术不可�
 | `temperature` | 0.5 是遵循规则的好起点 |
 | `top_p` | 0.9 一般够用，很少需要动 |
 | `max_tokens` | **要留余量**：思考型模型大半 token 花在隐藏推理上。正文像被截断时，看控制台的 `finish_reason=length` 警告并调大它 |
-| `n_ctx` | 仅 llama.cpp。技能 + 提示词 + `max_tokens` 超出时会拒绝运行并报出具体数字 |
-| `keep_model_loaded` | 仅 llama.cpp。设 `false` 则每次跑完卸载并释放显存 |
+| `unload_after_run` | **默认开启。** 提示词写完（成功或失败）后请求服务端卸载模型：`POST {root}/models/unload`（llama.cpp router）、`POST {root}/api/v1/models/unload`（LM Studio）、`POST {root}/api/generate` 带 `keep_alive: 0`（Ollama）。云端端点只会返回"无此端点"，不影响结果。连续批量写词时关掉它。 |
 
 ---
 
