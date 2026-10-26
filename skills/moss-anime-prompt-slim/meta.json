@@ -1,0 +1,5 @@
+{
+  "display_name": "MOSS 精简版（§17 英文执行指令）",
+  "language": "en",
+  "notes": "第 17 节原文提取，约 4k tokens；适合 16k 上下文的模型。Layout 字段定义包含在 LAYOUT DRAFT 段。"
+}
