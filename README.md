@@ -42,25 +42,41 @@ No pip dependencies at all (`urllib` only, Python ≥ 3.10).
 
 ---
 
+## Endpoints: `skillprompt.ini`
+
+The node never shows a URL or an API key. Endpoints live in `skillprompt.ini` next to
+the node, one `[section]` per dropdown entry:
+
+```ini
+[local-llamacpp]                     ; section name = stable id, shows if `name` is absent
+name = 本地 llama.cpp 27B            ; display name in the dropdown (Chinese is fine)
+base_url = http://127.0.0.1:8491/v1  ; OpenAI-compatible endpoint, up to /v1
+model = Ukisai-Swift-1.5-Qwen3.8-27B-Q6_K_L-MTP
+api_key =                            ; optional, local servers usually need none
+
+[deepseek]
+name = DeepSeek 云端
+base_url = https://api.deepseek.com/v1
+model = deepseek-chat
+api_key_env = DEEPSEEK_API_KEY       ; read the key from an env var instead of the file
+```
+
+- Copy `skillprompt.ini.example` → `skillprompt.ini` and uncomment what you need.
+- Sections named `example*` are ignored, so they are safe for notes.
+- Sections missing `base_url` or `model` are skipped.
+- `SKILLPROMPT_CONFIG=<path>` overrides the config location.
+- **Restart ComfyUI after editing** — the dropdown is built at load time.
+- `skillprompt.ini` is git-ignored: it holds addresses, and maybe keys.
+
+---
+
 ## Quick start
 
-1. Add **Skill Prompt Optimizer**.
-2. Pick a `skill` — `moss-anime-prompt-slim` for small contexts, `moss-anime-prompt`
-   for the full rulebook.
-3. Fill `base_url` + `model`:
-
-| Backend | base_url | Notes |
-|---|---|---|
-| Ollama | `http://127.0.0.1:11434/v1` | model e.g. `qwen2.5:14b-instruct` |
-| LM Studio | `http://127.0.0.1:1234/v1` | model = the id shown in the server tab |
-| llama.cpp server | `http://127.0.0.1:8080/v1` | model = the loaded model's path |
-| DeepSeek | `https://api.deepseek.com/v1` | api_key required, model = `deepseek-chat` |
-| OpenAI | `https://api.openai.com/v1` | api_key required |
-
-4. Paste your rough prompt, pick `output_format` (`auto` / `caption` / `tag` / `layout`),
+1. Copy `skillprompt.ini.example` to `skillprompt.ini`, fill in one endpoint.
+2. Add **Skill Prompt Optimizer**, pick a `skill` (`moss-anime-prompt-slim` for small
+   contexts, `moss-anime-prompt` for the full rulebook) and an `llm_model`.
+3. Paste your rough prompt, pick `output_format` (`auto` / `caption` / `tag` / `layout`),
    run. Wire `optimized_prompt` into a `CLIPTextEncode`.
-
-Local endpoints need no api_key.
 
 ---
 

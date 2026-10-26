@@ -1,9 +1,8 @@
-"""End-to-end check: run the node's core against a real OpenAI-compatible
-endpoint, then (for --format layout) compile the returned draft.
+"""End-to-end check: run the node's core against a profile from skillprompt.ini.
 
-Usage:
-  python tests/e2e_optimize.py --base-url http://127.0.0.1:11434/v1 \
-      --model qwen2.5:14b --skill moss-anime-prompt-slim --format caption
+  python tests/e2e_optimize.py --list                      # show configured profiles
+  python tests/e2e_optimize.py --profile "A 机 27B（快）" --format caption
+  python tests/e2e_optimize.py --profile local-router --format layout --width 1024 --height 1536
 """
 
 import argparse
@@ -12,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from nodes import config  # noqa: E402
 from nodes.layout_compiler import SkillPromptLayoutCompiler  # noqa: E402
 from nodes.optimizer import SkillPromptOptimizer  # noqa: E402
 
@@ -29,9 +29,8 @@ POSTER = "咖啡海报：上方大标题「星海咖啡」，左边一个红杯�
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base-url", default="http://127.0.0.1:11434/v1")
-    ap.add_argument("--model", default="")
-    ap.add_argument("--api-key", default="")
+    ap.add_argument("--list", action="store_true", help="print configured profiles and exit")
+    ap.add_argument("--profile", default=None, help="display name from skillprompt.ini")
     ap.add_argument("--skill", default="moss-anime-prompt-slim")
     ap.add_argument("--format", default="caption", choices=["auto", "caption", "tag", "layout"])
     ap.add_argument("--language", default="English", choices=["English", "中文", "Bilingual"])
@@ -45,18 +44,27 @@ def main() -> int:
     ap.add_argument("--keep-loaded", action="store_true", help="do not unload the model after the run")
     args = ap.parse_args()
 
+    if args.list or not args.profile:
+        print(f"config: {config.CONFIG_PATH}")
+        print("configured profiles:")
+        for name in config.choices():
+            prof = config.profiles().get(name)
+            if prof:
+                print(f"  - {name}  ->  {prof['model']}  @  {prof['base_url']}")
+            else:
+                print(f"  - {name}")
+        return 0
+
     prompt = args.prompt or (POSTER if args.prompt_preset == "poster" else HOSHINO)
 
     node = SkillPromptOptimizer()
     text, size_note, width, height = node.optimize(
         prompt=prompt,
         skill=args.skill,
+        llm_model=args.profile,
         width=args.width,
         height=args.height,
         disable_thinking=not args.keep_thinking,
-        base_url=args.base_url,
-        model=args.model,
-        api_key=args.api_key,
         language=args.language,
         output_format=args.format,
         temperature=0.5,

@@ -1,44 +1,38 @@
-"""SkillPrompt optimizer node (HTTP only).
+"""SkillPrompt optimizer node.
 
-Any OpenAI-compatible endpoint: llama.cpp router/server, LM Studio, Ollama,
-vLLM, DeepSeek, OpenAI, ...
+Endpoints come from ``skillprompt.ini`` (see ``skillprompt.ini.example``): the node
+shows one ``llm_model`` dropdown and never exposes a URL or a key as a widget.
 
 Canvas contract
 ---------------
 ``width`` / ``height`` are BOTH an input and an output:
 
-* input > 0  -> fixed canvas. Handed to the model as a hard composition
-  constraint (and, for Layout, as the bbox bounds). The outputs echo the input;
-  a size the model claims differently is logged and ignored.
-* input == 0 -> auto. The model picks the canvas and the size is parsed back out
-  of the ``CANVAS: WxH`` line.
+* input > 0  -> fixed canvas, handed to the model as a hard composition
+  constraint (and, for Layout, as the bbox bounds); the outputs echo it.
+* input == 0 -> auto: the model picks the canvas and the size is parsed from its
+  ``CANVAS: WxH`` line.
 * both must be 0 or both > 0.
 
-Thinking switch
----------------
-``disable_thinking`` defaults on: prompt rewriting wants the answer, not the
-chain of thought. Sends ``chat_template_kwargs={"enable_thinking": false}``
-(understood by llama.cpp server / LM Studio / vLLM / SGLang) and falls back to a
-``/no_think`` prompt suffix when a server rejects the field.
+Other switches
+--------------
+``disable_thinking`` (default on) sends ``chat_template_kwargs={"enable_thinking":
+false}`` and falls back to a ``/no_think`` suffix when a server rejects the field.
 
-VRAM
-----
-``unload_after_run`` (default on) asks the server to drop the model once the
-prompt is written, because the next step in a ComfyUI graph is usually the image
-model on the same GPU. See ``nodes/unload.py`` for the per-server endpoint.
+``unload_after_run`` (default on) asks the server to drop the model once the prompt
+is written, because the next step in a ComfyUI graph is usually the image model on
+the same GPU. See ``nodes/unload.py`` for the per-server endpoint.
 """
 
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import http_client
+from . import config, http_client
 from . import unload as unload_mod
 from .promptkit import sanitize_output
 from .skills import estimate_tokens, get_skill, skill_choices
 
 CATEGORY = "SkillPrompt"
-DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
 
 LANGUAGE_HINTS = {
     "English": "语言：英文（默认）。只输出英文正向提示词。",
@@ -54,6 +48,10 @@ FORMAT_HINTS = {
 }
 
 SKILL_TOOLTIP = "写词规则书：skills/<名称>/SKILL.md 全文作为 system 提示词。新增技能后重启 ComfyUI。"
+MODEL_TOOLTIP = (
+    "端点配置来自 skillprompt.ini（每段一项）。改完文件要重启 ComfyUI。"
+    "地址和 key 都在 ini 里，节点不显示。"
+)
 PROMPT_TOOLTIP = "原始需求：tag 串、一句话或一段中文描述都行。"
 EXTRA_TOOLTIP = "本次追加要求（如“不要画标题”）。只追加，不覆盖 skill 规则。"
 LANG_TOOLTIP = "English 默认；中文只出中文；Bilingual 出两份各自完整的版本。"
@@ -62,7 +60,6 @@ TEMP_TOOLTIP = "遵循规则建议 0.5 左右。"
 TOPP_TOOLTIP = "核采样阈值，一般 0.9。"
 MAXTOK_TOOLTIP = "思考型模型会先花大量 token 在隐藏推理上，2048 起步更稳。"
 TIMEOUT_TOOLTIP = "单次请求超时（秒）。本地 27B + 完整模板首次 prefill 可能要一两分钟。"
-BASEURL_TOOLTIP = "OpenAI 兼容端点，如 http://127.0.0.1:11434/v1（Ollama）、http://127.0.0.1:8491/v1（llama.cpp router）。"
 WIDTH_TOOLTIP = "画布宽。＞0 时作为硬约束交给模型，并原样输出；0 = 让模型自己决定（从 CANVAS 行解析）。Layout 模式要求 16 的倍数。"
 HEIGHT_TOOLTIP = "画布高。＞0 时作为硬约束交给模型，并原样输出；0 = 让模型自己决定。Layout 模式要求 16 的倍数。"
 THINK_TOOLTIP = (
@@ -211,7 +208,7 @@ def _generate(
 
 
 class SkillPromptOptimizer:
-    """Any OpenAI-compatible endpoint (Ollama / LM Studio / llama.cpp / cloud)."""
+    """Any OpenAI-compatible endpoint listed in skillprompt.ini."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -219,12 +216,10 @@ class SkillPromptOptimizer:
             "required": {
                 "prompt": ("STRING", {"multiline": True, "default": "", "tooltip": PROMPT_TOOLTIP}),
                 "skill": (skill_choices(), {"tooltip": SKILL_TOOLTIP}),
+                "llm_model": (config.choices(), {"tooltip": MODEL_TOOLTIP}),
                 "width": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 16, "tooltip": WIDTH_TOOLTIP}),
                 "height": ("INT", {"default": 0, "min": 0, "max": 8192, "step": 16, "tooltip": HEIGHT_TOOLTIP}),
                 "disable_thinking": ("BOOLEAN", {"default": True, "tooltip": THINK_TOOLTIP}),
-                "base_url": ("STRING", {"default": DEFAULT_BASE_URL, "tooltip": BASEURL_TOOLTIP}),
-                "model": ("STRING", {"default": "", "tooltip": "服务端实际暴露的模型名。"}),
-                "api_key": ("STRING", {"default": "", "tooltip": "本地端点留空；云端服务填 key。"}),
                 "language": (["English", "中文", "Bilingual"], {"tooltip": LANG_TOOLTIP}),
                 "output_format": (["auto", "caption", "tag", "layout"], {"tooltip": FORMAT_TOOLTIP}),
                 "temperature": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip": TEMP_TOOLTIP}),
@@ -241,22 +236,28 @@ class SkillPromptOptimizer:
     FUNCTION = "optimize"
     CATEGORY = CATEGORY
 
-    def optimize(self, prompt, skill, width, height, disable_thinking, base_url, model,
-                 api_key, language, output_format, temperature, top_p, max_tokens,
-                 timeout, unload_after_run, extra_instruction):
+    def optimize(self, prompt, skill, llm_model, width, height, disable_thinking,
+                 language, output_format, temperature, top_p, max_tokens, timeout,
+                 unload_after_run, extra_instruction):
+        profile = config.get(llm_model)
+        print(f"[SkillPrompt] endpoint={profile['name']} model={profile['model']}")
+
         def sender(messages, est):
             if est > 24000:
                 print(f"[SkillPrompt] 警告：系统提示约 {est} tokens，确认服务端上下文窗口够大（≥32k 更稳妥）。")
             return http_client.chat_completion(
-                base_url=base_url, api_key=api_key, model=model, messages=messages,
-                temperature=temperature, top_p=top_p, max_tokens=max_tokens, timeout=timeout,
-                disable_thinking=disable_thinking,
+                base_url=profile["base_url"], api_key=profile["api_key"],
+                model=profile["model"], messages=messages,
+                temperature=temperature, top_p=top_p, max_tokens=max_tokens,
+                timeout=timeout, disable_thinking=disable_thinking,
             )
 
         def on_finish():
             if not unload_after_run:
                 return
-            ok, detail = unload_mod.unload_model(base_url, api_key, model, timeout=10)
+            ok, detail = unload_mod.unload_model(
+                profile["base_url"], profile["api_key"], profile["model"], timeout=10
+            )
             print(f"[SkillPrompt] {'已释放显存：' if ok else '卸载未完成：'}{detail}")
 
         return _generate(prompt, skill, extra_instruction, language, output_format,

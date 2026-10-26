@@ -1,0 +1,49 @@
+; SkillPrompt —— HTTP 端点配置（示例）
+;
+; 用法：
+;   1. 把本文件复制成 skillprompt.ini（同一个文件夹）
+;   2. 取消你要用的段的注释，填上 base_url 与 model
+;   3. 重启 ComfyUI；节点的 llm_model 下拉框会列出每一段
+;
+; 规则：
+;   * [段名]     = 下拉框里的一项；建议用英文/数字/连字符，作为稳定 id
+;   * name      = 下拉框显示名，可写中文（不填则用段名）
+;   * base_url  = OpenAI 兼容端点，写到 /v1 为止
+;   * model     = 该端点暴露的模型名
+;   * api_key   = 可选；本地服务留空
+;   * api_key_env = 可选，从环境变量读 key（有值时优先于 api_key）
+;   * 以 example 开头的段会被忽略，可以放心用来存笔记
+;
+; 端点里写了 http 地址和 key，所以 skillprompt.ini 不要提交进 git。
+
+; ---- 本地 llama.cpp（router 或 server 均可）----
+; [local-llamacpp]
+; name = 本地 llama.cpp 27B
+; base_url = http://127.0.0.1:8491/v1
+; model = Ukisai-Swift-1.5-Qwen3.8-27B-Q6_K_L-MTP
+
+; ---- Ollama ----
+; [ollama-14b]
+; name = Ollama 本地 14B
+; base_url = http://127.0.0.1:11434/v1
+; model = qwen2.5:14b-instruct
+
+; ---- LM Studio ----
+; [lmstudio]
+; name = LM Studio
+; base_url = http://127.0.0.1:1234/v1
+; model = qwen3-8b-instruct
+
+; ---- 云端：DeepSeek（key 从环境变量读，避免写进文件）----
+; [deepseek]
+; name = DeepSeek 云端
+; base_url = https://api.deepseek.com/v1
+; model = deepseek-chat
+; api_key_env = DEEPSEEK_API_KEY
+
+; ---- 云端：OpenAI ----
+; [openai-mini]
+; name = OpenAI gpt-4o-mini
+; base_url = https://api.openai.com/v1
+; model = gpt-4o-mini
+; api_key_env = OPENAI_API_KEY

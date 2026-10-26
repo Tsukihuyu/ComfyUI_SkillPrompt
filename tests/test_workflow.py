@@ -68,9 +68,12 @@ class TestExampleWorkflow(unittest.TestCase):
         names = list(spec.keys())
         values = dict(zip(names, node["widgets_values"]))
         self.assertIn(values["skill"], spec["skill"][0])
+        self.assertIn(values["llm_model"], spec["llm_model"][0])
         self.assertIn(values["output_format"], spec["output_format"][0])
         self.assertIn(values["language"], spec["language"][0])
-        self.assertTrue(values["base_url"].startswith("http"))
+        # endpoints live in skillprompt.ini, never as widgets
+        self.assertNotIn("base_url", values)
+        self.assertNotIn("api_key", values)
 
     def test_no_orphan_outputs(self):
         """Core nodes: every output must be consumed. Our nodes may leave the

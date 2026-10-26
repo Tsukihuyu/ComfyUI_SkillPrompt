@@ -40,24 +40,40 @@ git clone <本仓库>
 
 ---
 
+## 端点：`skillprompt.ini`
+
+节点不显示地址、不显示 key。端点在节点目录的 `skillprompt.ini` 里，一个 `[段]` 对应下拉框一项：
+
+```ini
+[local-llamacpp]                     ; 段名 = 稳定 id；没有 name 时直接显示段名
+name = 本地 llama.cpp 27B            ; 下拉框显示名，可以写中文
+base_url = http://127.0.0.1:8491/v1  ; OpenAI 兼容端点，写到 /v1 为止
+model = Ukisai-Swift-1.5-Qwen3.8-27B-Q6_K_L-MTP
+api_key =                            ; 可选，本地服务通常不用
+
+[deepseek]
+name = DeepSeek 云端
+base_url = https://api.deepseek.com/v1
+model = deepseek-chat
+api_key_env = DEEPSEEK_API_KEY       ; 从环境变量读 key，不落盘
+```
+
+- 复制 `skillprompt.ini.example` 成 `skillprompt.ini`，取消你要用的段的注释。
+- 以 `example` 开头的段会被忽略，可以放心当笔记用。
+- 缺 `base_url` 或 `model` 的段会被跳过。
+- `SKILLPROMPT_CONFIG=<路径>` 可改配置文件位置。
+- **改完要重启 ComfyUI**（下拉框在加载时构建）。
+- `skillprompt.ini` 已进 .gitignore：里面是地址，也可能有 key。
+
+---
+
 ## 快速开始
 
-1. 添加 **Skill Prompt Optimizer** 节点。
-2. 选 `skill`：小上下文用 `moss-anime-prompt-slim`，32k 以上用 `moss-anime-prompt`。
-3. 填 `base_url` 与 `model`：
-
-| 后端 | base_url | 说明 |
-|---|---|---|
-| Ollama | `http://127.0.0.1:11434/v1` | 模型如 `qwen2.5:14b-instruct` |
-| LM Studio | `http://127.0.0.1:1234/v1` | 模型名用服务页显示的 id |
-| llama.cpp server | `http://127.0.0.1:8080/v1` | 模型名用已加载模型的路径 |
-| DeepSeek | `https://api.deepseek.com/v1` | 需要 api_key，模型 `deepseek-chat` |
-| OpenAI | `https://api.openai.com/v1` | 需要 api_key |
-
-4. 粘进粗糙提示词，选 `output_format`（`auto` / `caption` / `tag` / `layout`），运行。
+1. 复制 `skillprompt.ini.example` 为 `skillprompt.ini`，填一个端点。
+2. 添加 **Skill Prompt Optimizer**，选 `skill`（小上下文用 `moss-anime-prompt-slim`，
+   32k 以上用 `moss-anime-prompt`），再选 `llm_model`。
+3. 粘进粗糙提示词，选 `output_format`（`auto` / `caption` / `tag` / `layout`），运行。
    把 `optimized_prompt` 接到 `CLIPTextEncode`。
-
-本地端点 api_key 留空即可。
 
 ---
 

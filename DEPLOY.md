@@ -27,7 +27,8 @@ robocopy "D:\Hermes\projects\ComfyUI_SkillPrompt" "D:\GAME\ComfyUI\ComfyUI\custo
 - `Skill Prompt Optimizer`
 - `Skill Prompt Layout Compiler`
 
-启动日志里应该能看到一条 `[SkillPrompt] skills: ...`（首次建下拉框时扫描）。
+`llm_model` 下拉框里应能看到 `skillprompt.ini` 里配置的端点（例如 `A 机 27B（快）`）。
+如果只有占位符 `(no endpoint configured - edit skillprompt.ini)`，说明 ini 没拷或没填。
 
 ## 4. 五分钟自测
 
@@ -36,8 +37,7 @@ robocopy "D:\Hermes\projects\ComfyUI_SkillPrompt" "D:\GAME\ComfyUI\ComfyUI\custo
 | 字段 | 改成 |
 |---|---|
 | Checkpoint | 你机器上实际有的 |
-| `base_url` | `http://127.0.0.1:8491/v1`（A 机自己的 router） |
-| `model` | `Ukisai-Swift-1.5-Qwen3.8-27B-Q6_K_L-MTP` |
+| `llm_model` | 选 ini 里的 `A 机 27B（快）`（先确认 `skillprompt.ini` 存在且有这一段） |
 | `disable_thinking` | 保持 `true`（关掉思考，输出才是干净的提示词） |
 | `unload_after_run` | 保持 `true`（写完立即卸载，把显存让给出图） |
 
