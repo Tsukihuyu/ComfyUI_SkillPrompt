@@ -28,7 +28,7 @@
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/<你>/ComfyUI_SkillPrompt.git
+git clone https://github.com/Tsukihuyu/ComfyUI_SkillPrompt.git
 cp ComfyUI_SkillPrompt/skillprompt.ini.example ComfyUI_SkillPrompt/skillprompt.ini
 # 编辑 skillprompt.ini，然后重启 ComfyUI
 ```

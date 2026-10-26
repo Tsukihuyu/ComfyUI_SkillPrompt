@@ -9,8 +9,8 @@ readme = "README.md"
 keywords = ["comfyui", "prompt", "llm", "skill", "layout", "qwen", "anime"]
 
 [project.urls]
-Repository = "https://github.com/CHANGE_ME/ComfyUI_SkillPrompt"
-Issues = "https://github.com/CHANGE_ME/ComfyUI_SkillPrompt/issues"
+Repository = "https://github.com/Tsukihuyu/ComfyUI_SkillPrompt"
+Issues = "https://github.com/Tsukihuyu/ComfyUI_SkillPrompt/issues"
 
 # Fill PublisherId with your Comfy Registry publisher id before `comfy node publish`.
 [tool.comfy]

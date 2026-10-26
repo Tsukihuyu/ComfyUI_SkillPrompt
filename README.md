@@ -32,7 +32,7 @@ client for whatever OpenAI-compatible server you already run.
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/<you>/ComfyUI_SkillPrompt.git
+git clone https://github.com/Tsukihuyu/ComfyUI_SkillPrompt.git
 cp ComfyUI_SkillPrompt/skillprompt.ini.example ComfyUI_SkillPrompt/skillprompt.ini
 # edit skillprompt.ini, then restart ComfyUI
 ```
